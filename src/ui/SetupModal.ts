@@ -5,6 +5,7 @@
 import type { GameEngine } from '../core/GameEngine.ts';
 import type { Gender, FamilyStatus, DifficultyLevel } from '../types/index.ts';
 import { NEIGHBORHOOD_TYPES, STARTING_SCENARIOS, FAMILY_TEMPLATES } from '../data/scenarios.ts';
+import { TURKEY_PROVINCES } from '../data/turkey_map.ts';
 import { SaveManager } from '../core/SaveManager.ts';
 
 export class SetupModal {
@@ -66,14 +67,12 @@ export class SetupModal {
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Şehir</label>
+              <label class="form-label">Başlangıç Şehri (81 İl)</label>
               <select id="setup-city" class="form-select">
-                <option value="İstanbul">İstanbul</option>
-                <option value="Ankara">Ankara</option>
-                <option value="İzmir">İzmir</option>
-                <option value="Bursa">Bursa</option>
-                <option value="Hatay">Hatay</option>
-                <option value="Trabzon">Trabzon</option>
+                ${TURKEY_PROVINCES.map(
+                  (p) =>
+                    `<option value="${p.name}" ${p.id === 'istanbul' ? 'selected' : ''}>${p.plate} - ${p.name} (${p.region})</option>`
+                ).join('')}
               </select>
             </div>
             <div class="form-group">

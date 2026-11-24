@@ -1,35 +1,124 @@
 // ============================================================================
-// ÇOKLU ŞUBE VE TÜRKİYE BAYİLEŞME SİSTEMİ (BranchSystem.ts)
-// Şube açma koşul kontrolü, şubeler arası geçiş, şube kapatma ve zincir muhasebesi
+// ÇOKLU ŞUBE, BAYİLİK (FRANCHISE) VE TÜRKİYE GENİŞLEME SİSTEMİ (BranchSystem.ts)
 // ============================================================================
 
 import type { GameState, BranchState, IngredientStock, MenuItemState } from '../types/index.ts';
 import { TURKEY_PROVINCES, getDistrictsForProvince, type DistrictDef } from '../data/turkey_map.ts';
 import { EXPANSION_CONFIG, QUEST_CATALOG } from '../data/quests.ts';
+import { MANAGEMENT_CONFIG, REGIONAL_CULTURE_MODIFIERS, LOCAL_RIVAL_CHAINS } from '../data/management.ts';
 import { INGREDIENTS } from '../data/ingredients.ts';
 import { RECIPES } from '../data/recipes.ts';
 import { ReputationSystem } from './ReputationSystem.ts';
 import { bus } from './EventBus.ts';
 
 export class BranchSystem {
-  public static cityToProvinceId(cityName: string): string {
-    const map: Record<string, string> = {
-      'İstanbul': 'istanbul',
-      'Ankara': 'ankara',
-      'İzmir': 'izmir',
-      'Bursa': 'bursa',
-      'Hatay': 'hatay',
-      'Trabzon': 'trabzon'
-    };
-    return map[cityName] || 'istanbul';
+  /**
+   * Faz 0.3: Türkçe karakter normalizasyonu ile 81 ilin tamamını TURKEY_PROVINCES üzerinden eşler.
+   */
+  public static normalizeTr(str: string): string {
+    return (str || '')
+      .trim()
+      .replace(/İ/g, 'i')
+      .replace(/I/g, 'i')
+      .replace(/ı/g, 'i')
+      .replace(/Ğ/g, 'g')
+      .replace(/ğ/g, 'g')
+      .replace(/Ü/g, 'u')
+      .replace(/ü/g, 'u')
+      .replace(/Ş/g, 's')
+      .replace(/ş/g, 's')
+      .replace(/Ö/g, 'o')
+      .replace(/ö/g, 'o')
+      .replace(/Ç/g, 'c')
+      .replace(/ç/g, 'c')
+      .toLowerCase();
   }
 
-  public static createHeadquartersBranch(state: GameState) {
+  public static cityToProvinceId(cityName: string): string {
+    if (!cityName) return 'istanbul';
+    const norm = this.normalizeTr(cityName);
+    const matched = TURKEY_PROVINCES.find(
+      (p) => p.id === norm || this.normalizeTr(p.name) === norm || p.plate === norm
+    );
+    if (matched) return matched.id;
+    const partial = TURKEY_PROVINCES.find(
+      (p) => this.normalizeTr(p.name).includes(norm) || norm.includes(p.id)
+    );
+    return partial ? partial.id : 'istanbul';
+  }
+
+  /**
+   * Faz 0.1: Yeni açılan şube merkezin 2. katını, kaldırım iznini ve eşyalarını bedava kopyalamaz;
+   * temel başlangıç dükkanıyla (6x5 grid, seviye 1, 2. katsız, izinsiz, temel tezgah/ocak/masa) başlar.
+   */
+  public static createStarterBranchShopSnapshot(branchName: string, initialRep: number): GameState['shop'] {
+    return {
+      name: branchName,
+      level: 1,
+      gridCols: MANAGEMENT_CONFIG.starterBranchGridCols,
+      gridRows: MANAGEMENT_CONFIG.starterBranchGridRows,
+      hasSidewalkPermit: false,
+      hasSecondFloor: false,
+      onlineDeliveryEnabled: false,
+      onlineCommissionRate: 0.18,
+      autoOrderIngredients: true,
+      wallColor: 'krem_siva',
+      floorStyle: 'klasik_karo',
+      hygiene: 90,
+      reputation: initialRep,
+      decorScore: MANAGEMENT_CONFIG.starterBranchDecorScore,
+      seatingCapacity: 6,
+      speedBonus: 12,
+      donerRollKg: 25,
+      donerMaxKg: 25,
+      donerCookLevel: 92,
+      autoRestockDoner: true,
+      trafficMultiplier: 1.0,
+      trafficReason: 'Normal Sokak Akışı (%100)',
+      placedItems: [
+        { instanceId: 'br_ocak_' + Date.now(), itemId: 'doner_ocagi_standart', gx: 1, gy: 0, condition: 100 },
+        { instanceId: 'br_tezgah_' + Date.now(), itemId: 'mermer_tezgah', gx: 2, gy: 0, condition: 100 },
+        { instanceId: 'br_kasa_' + Date.now(), itemId: 'kasa_pos', gx: 4, gy: 0, condition: 100 },
+        { instanceId: 'br_dolap_' + Date.now(), itemId: 'endustriyel_buzdolabi', gx: 0, gy: 0, condition: 100 },
+        { instanceId: 'br_masa1_' + Date.now(), itemId: 'tabureli_masa', gx: 1, gy: 2, condition: 100 },
+        { instanceId: 'br_masa2_' + Date.now(), itemId: 'aile_masasi_4', gx: 3, gy: 2, condition: 100 }
+      ]
+    };
+  }
+
+  /**
+   * Faz 0.5: Yeni şubenin başlangıç mahalle itibarı şehirdeki marka bilinirliğine ve şehir itibarına bağlıdır.
+   * O şehirde zaten şubemiz varsa şehir itibarı + şube bonusu ile daha yüksek, yeni şehirse daha düşük başlar.
+   */
+  public static calculateInitialNeighborhoodReputation(state: GameState, provinceId: string): number {
+    const existingBranchesInCity = (state.branches || []).filter((b) => b.provinceId === provinceId).length;
+    const countryRep = state.reputation?.countryReputation || 54;
+    const cityRep = state.reputation?.cityReputations?.[provinceId];
+
+    if (existingBranchesInCity > 0 && typeof cityRep === 'number') {
+      const fromCity =
+        cityRep * MANAGEMENT_CONFIG.existingCityRepWeight +
+        countryRep * 0.18 +
+        existingBranchesInCity * MANAGEMENT_CONFIG.existingCityBranchBonusPerBranch;
+      return Math.max(48, Math.min(MANAGEMENT_CONFIG.maxInitialNeighborhoodRep, Math.round(fromCity)));
+    }
+
+    // İlk kez girilen yeni bir şehir: ülke markasının kısmi etkisiyle daha mütevazı başlar
+    const knownCityRep = typeof cityRep === 'number' ? (cityRep - 50) * 0.25 : 0;
+    const newCityRep =
+      MANAGEMENT_CONFIG.newCityBaseNeighborhoodRep +
+      countryRep * MANAGEMENT_CONFIG.newCityCountryRepWeight +
+      knownCityRep;
+    return Math.max(40, Math.min(72, Math.round(newCityRep)));
+  }
+
+  public static createHeadquartersBranch(state: GameState): BranchState {
     const provId = this.cityToProvinceId(state.player.city);
     const prov = TURKEY_PROVINCES.find((p) => p.id === provId) || TURKEY_PROVINCES[0];
     const districts = getDistrictsForProvince(provId);
     const matchedDist =
       districts.find((d) => d.neighborhoodType === state.player.neighborhoodType) || districts[0];
+    const inf = state.finance?.inflationIndex || 1.0;
 
     return {
       id: 'branch_hq',
@@ -40,13 +129,15 @@ export class BranchSystem {
       districtName: matchedDist.name,
       neighborhoodType: matchedDist.neighborhoodType,
       isHeadquarters: true,
+      isFranchise: false,
+      regionName: prov.region,
       neighborhoodReputation: Math.round(state.shop.reputation),
       hygiene: Math.round(state.shop.hygiene),
       decorScore: state.shop.decorScore,
       seatingCapacity: state.shop.seatingCapacity,
       dailyRentBase: matchedDist.dailyRentBase,
       logisticsMultiplier: 1.0,
-      openingCostPaid: 35000,
+      openingCostPaid: Math.round(MANAGEMENT_CONFIG.hqOpeningCostBase * inf),
       staffCount: state.staff.length,
       stockHealthPct: 95,
       todayRevenue: state.finance.todayStats.revenue,
@@ -56,7 +147,7 @@ export class BranchSystem {
       todayStaffCost: 0,
       todayNetProfit: state.finance.todayStats.revenue - state.finance.todayStats.ingredientCost,
       todayCustomers: state.finance.todayStats.customersServed,
-      totalCumulativeProfit: 12500
+      totalCumulativeProfit: Math.round(MANAGEMENT_CONFIG.hqInitialCumulativeProfitBase * inf)
     };
   }
 
@@ -93,12 +184,21 @@ export class BranchSystem {
   }
 
   /**
-   * Oyuncunun yönetim ekranını seçilen şubeye geçirir (Her şube ayrı yönetilebilir).
+   * Oyuncunun yönetim ekranını seçilen şubeye geçirir (Bayiler doğrudan mikro yönetilemez, denetlenir).
    */
   public static switchActiveBranch(state: GameState, targetBranchId: string): boolean {
     if (state.activeBranchId === targetBranchId) return true;
     const target = state.branches.find((b) => b.id === targetBranchId);
     if (!target) return false;
+
+    if (target.isFranchise) {
+      bus.emit('toast:show', {
+        title: `◆ Bayilik Şubesi (${target.districtName})`,
+        text: `Bu lokasyon bağımsız bir Franchise bayisidir. Günlük operasyonunu bayi yürütür; Genel Merkez veya Harita üzerinden denetleyebilirsiniz.`,
+        type: 'warning'
+      });
+      return false;
+    }
 
     // Önce mevcut şubenin durumunu kaydet
     this.saveActiveToBranch(state);
@@ -118,6 +218,8 @@ export class BranchSystem {
     state.shop.name = target.name;
     state.shop.reputation = target.neighborhoodReputation;
     state.shop.hygiene = target.hygiene;
+    state.shop.seatingCapacity = target.seatingCapacity;
+    state.shop.decorScore = target.decorScore;
     state.finance.todayStats.revenue = target.todayRevenue;
     state.finance.todayStats.ingredientCost = target.todayIngredientCost;
     state.finance.todayStats.customersServed = target.todayCustomers;
@@ -133,9 +235,9 @@ export class BranchSystem {
   }
 
   /**
-   * Bir ilçede yeni şube açmak için gereken iki temel koşulu (Görev/İtibar + Nakit) ve maliyet dökümünü hesaplar.
+   * Bir ilçede yeni şube veya bayilik açmak için gereken koşulları ve maliyet dökümünü hesaplar.
    */
-  public static evaluateDistrictOpening(state: GameState, provinceId: string, district: any) {
+  public static evaluateDistrictOpening(state: GameState, provinceId: string, district: DistrictDef) {
     const prov = TURKEY_PROVINCES.find((p) => p.id === provinceId) || TURKEY_PROVINCES[0];
     const inf = state.finance.inflationIndex;
     const realEstateDealMult = state.npcs['emlakci_murat']?.hasActiveDeal ? 0.85 : 1.0;
@@ -144,18 +246,27 @@ export class BranchSystem {
     const openingCost = Math.round(district.openingCostBase * inf * realEstateDealMult);
     const dailyRent = Math.round(district.dailyRentBase * inf);
 
-    // Lojistik çarpanı: Merkez şube ile aynı ildeyse düşük, farklı ildeyse mesafe çarpanlı
+    // Lojistik çarpanı: Merkez depo varsa soğuk zincir indirimi uygulanır
     const hqProvId = state.branches[0]?.provinceId || 'istanbul';
     const isSameProvince = hqProvId === provinceId;
-    const logisticsMultiplier = isSameProvince ? 1.05 : prov.logisticsDistanceFactor;
+    const warehouse = state.chainManagement?.warehouse;
+    const warehouseColdReduction = warehouse?.built ? warehouse.coldChainReductionPct : 0;
+
+    const rawLogisticsMult = isSameProvince ? 1.05 : prov.logisticsDistanceFactor;
+    const logisticsMultiplier = Number(
+      Math.max(1.0, 1 + (rawLogisticsMult - 1) * (1 - warehouseColdReduction)).toFixed(2)
+    );
     const estDailyLogistics = Math.round(
-      (isSameProvince ? 180 : 380 * prov.logisticsDistanceFactor) * inf
+      (isSameProvince ? 180 : 380 * logisticsMultiplier) * inf
     );
 
     // Şube sayısı arttıkça binen holding yönetim yükü
     const nextBranchIndex = state.branches.length + 1;
     const estHoldingOverhead = Math.round(
-      EXPANSION_CONFIG.holdingOverheadPerBranch * nextBranchIndex * (1 + (nextBranchIndex - 1) * EXPANSION_CONFIG.branchComplexityMultiplier) * inf
+      EXPANSION_CONFIG.holdingOverheadPerBranch *
+        nextBranchIndex *
+        (1 + (nextBranchIndex - 1) * EXPANSION_CONFIG.branchComplexityMultiplier) *
+        inf
     );
 
     // Koşul 1: Görev Kademesi & Maksimum Şube Hakkı
@@ -172,6 +283,17 @@ export class BranchSystem {
     // Koşul 3: Yeterli Nakit Para
     const hasEnoughCash = state.finance.cash >= openingCost;
 
+    // Faz 0.5: Tahmini başlangıç mahalle itibarı
+    const estimatedInitialRep = this.calculateInitialNeighborhoodReputation(state, provinceId);
+
+    // Faz 5: Bayilik (Franchise) verilebilir mi?
+    const franchiseUpfrontFee = Math.round(openingCost * MANAGEMENT_CONFIG.franchiseUpfrontFeeRatio);
+    const canGrantFranchise =
+      !alreadyOpen &&
+      state.branches.length >= MANAGEMENT_CONFIG.franchiseMinBranchesRequired &&
+      countryRep >= Math.max(MANAGEMENT_CONFIG.franchiseMinCountryRep, district.minCountryRep) &&
+      hasBranchSlot;
+
     const canOpen =
       !alreadyOpen &&
       isQuestTierCompleted &&
@@ -181,7 +303,7 @@ export class BranchSystem {
       hasEnoughCash;
 
     const reasons: string[] = [];
-    if (alreadyOpen) reasons.push('Bu ilçede zaten aktif bir şubeniz bulunuyor.');
+    if (alreadyOpen) reasons.push('Bu ilçede zaten aktif bir şubeniz veya bayiniz bulunuyor.');
     if (!isQuestTierCompleted) reasons.push(`Kademe ${district.requiredQuestTier} görev setinin tamamlanması gerekiyor.`);
     if (!hasBranchSlot) reasons.push(`Mevcut şube açma limitiniz (${state.quests.maxAllowedBranches} Şube) dolu. Yeni görev kademesini tamamlayın.`);
     if (!meetsCityRep) reasons.push(`${prov.name} Şehir İtibarı en az ${district.minCityRep} olmalı (Şu an: ${cityRep}).`);
@@ -203,12 +325,16 @@ export class BranchSystem {
       hasEnoughCash,
       cityRep,
       countryRep,
+      estimatedInitialRep,
+      canGrantFranchise,
+      franchiseUpfrontFee,
+      franchiseRoyaltyPct: MANAGEMENT_CONFIG.franchiseDefaultRoyaltyPct,
       reasons
     };
   }
 
   /**
-   * Seçilen il ve ilçede yeni şube açar.
+   * Seçilen il ve ilçede yeni öz şube açar (Faz 0 düzeltmeleriyle).
    */
   public static openNewBranch(state: GameState, provinceId: string, districtId: string): { ok: boolean; msg: string } {
     const districts = getDistrictsForProvince(provinceId);
@@ -232,12 +358,13 @@ export class BranchSystem {
 
     // Yeni şube için başlangıç stoku ve menü kopyası oluştur
     const newInv: Record<string, IngredientStock> = {};
+    const effectiveTier = state.chainManagement?.chainPolicy?.supplierTier || 'standart';
     for (const ing of INGREDIENTS) {
       newInv[ing.id] = {
         ingredientId: ing.id,
-        amount: Math.round(ing.startingStock * 0.75),
+        amount: Math.round(ing.startingStock * 0.8),
         freshnessDays: ing.shelfLifeDays,
-        supplierTier: 'standart'
+        supplierTier: effectiveTier
       };
     }
 
@@ -246,7 +373,7 @@ export class BranchSystem {
       newMenu[rec.id] = {
         recipeId: rec.id,
         active: state.menu[rec.id]?.active ?? true,
-        price: state.menu[rec.id]?.price || rec.baseSuggestedPrice,
+        price: state.menu[rec.id]?.price || Math.round(rec.baseSuggestedPrice * state.finance.inflationIndex),
         portionFactor: 1.0,
         soldToday: 0,
         soldTotal: 0
@@ -254,25 +381,32 @@ export class BranchSystem {
     }
 
     const baseName = state.branches[0]?.name.split('(')[0].trim() || 'Meşhur Dönerci';
+    const branchLabel = `${baseName} (${prov.name} - ${district.name})`;
+    const initialNeighborhoodRep = check.estimatedInitialRep;
+    const starterShop = this.createStarterBranchShopSnapshot(branchLabel, initialNeighborhoodRep);
+    const chefBaseSalary = MANAGEMENT_CONFIG.baseChefMonthlySalary;
+
     const newBranchId = `branch_${provinceId}_${district.id}_${Date.now()}`;
     const newBranch: BranchState = {
       id: newBranchId,
-      name: `${baseName} (${prov.name} - ${district.name})`,
+      name: branchLabel,
       provinceId: prov.id,
       provinceName: prov.name,
       districtId: district.id,
       districtName: district.name,
       neighborhoodType: district.neighborhoodType,
       isHeadquarters: false,
-      neighborhoodReputation: Math.max(52, Math.round(check.countryRep * 0.9)),
-      hygiene: 90,
-      decorScore: 22,
-      seatingCapacity: 8,
+      isFranchise: false,
+      regionName: prov.region,
+      neighborhoodReputation: initialNeighborhoodRep,
+      hygiene: starterShop.hygiene,
+      decorScore: starterShop.decorScore,
+      seatingCapacity: starterShop.seatingCapacity,
       dailyRentBase: district.dailyRentBase,
       logisticsMultiplier: check.logisticsMultiplier,
       openingCostPaid: check.openingCost,
       staffCount: 1,
-      stockHealthPct: 85,
+      stockHealthPct: 88,
       todayRevenue: 0,
       todayIngredientCost: 0,
       todayRentAndTax: 0,
@@ -282,15 +416,7 @@ export class BranchSystem {
       todayCustomers: 0,
       totalCumulativeProfit: 0,
       snapshot: {
-        shop: {
-          ...JSON.parse(JSON.stringify(state.shop)),
-          name: `${baseName} (${prov.name} - ${district.name})`,
-          level: 1,
-          hygiene: 90,
-          reputation: Math.max(52, Math.round(check.countryRep * 0.9)),
-          donerRollKg: 25,
-          donerMaxKg: 25
-        },
+        shop: starterShop,
         inventory: newInv,
         staff: [
           {
@@ -299,7 +425,7 @@ export class BranchSystem {
             role: 'usta',
             skill: 72,
             morale: 88,
-            baseSalary: 25000,
+            baseSalary: chefBaseSalary,
             experienceDays: 1
           }
         ],
@@ -311,13 +437,13 @@ export class BranchSystem {
     state.storyLog.push({
       day: state.time.day,
       title: `🏪 Yeni Şube Açıldı: ${newBranch.name}!`,
-      text: `${prov.name} / ${district.name} lokasyonunda ${state.branches.length}. şubenin ocağı yakıldı!`
+      text: `${prov.name} / ${district.name} lokasyonunda ${state.branches.length}. şubenin ocağı yakıldı! (Başlangıç Mahalle İtibarı: ${initialNeighborhoodRep})`
     });
 
     ReputationSystem.syncReputations(state);
     bus.emit('toast:show', {
       title: `🎉 Yeni Şube Açıldı: ${district.name}!`,
-      text: `${prov.name} - ${district.name} şubeniz hizmete girdi! Şubeler arasında geçiş yaparak yönetebilirsiniz.`,
+      text: `${prov.name} - ${district.name} şubeniz hizmete girdi! Başlangıç Mahalle İtibarı: ${initialNeighborhoodRep}.`,
       type: 'success'
     });
     bus.emit('state:updated', state);
@@ -325,7 +451,86 @@ export class BranchSystem {
   }
 
   /**
-   * Zarardaki veya nakit ihtiyacı olan bir şubeyi kapatır/devreder (Merkez şube kapatılamaz).
+   * Faz 5: Seçilen ilçede kendi şubeni açmak yerine Girişimciye İsim Hakkı (Franchise / Bayilik) verir.
+   * Peşin isim hakkı bedeli kasaya girer + günlük cirodan %10 royalty alınır, kira/maaş/yatırım masrafı yoktur.
+   */
+  public static grantFranchiseBranch(state: GameState, provinceId: string, districtId: string): { ok: boolean; msg: string } {
+    const districts = getDistrictsForProvince(provinceId);
+    const district = districts.find((d) => d.id === districtId);
+    const prov = TURKEY_PROVINCES.find((p) => p.id === provinceId);
+    if (!district || !prov) {
+      return { ok: false, msg: 'Lokasyon bilgisi bulunamadı.' };
+    }
+
+    const check = this.evaluateDistrictOpening(state, provinceId, district);
+    if (!check.canGrantFranchise) {
+      return {
+        ok: false,
+        msg: `Bayilik vermek için en az ${MANAGEMENT_CONFIG.franchiseMinBranchesRequired} şube, yeterli شube hakkı ve ${MANAGEMENT_CONFIG.franchiseMinCountryRep}+ Ülke Marka İtibarı gerekir.`
+      };
+    }
+
+    this.saveActiveToBranch(state);
+
+    // Peşin isim hakkı (Franchise Fee) kasaya gelir olarak girer!
+    state.finance.cash += check.franchiseUpfrontFee;
+    state.finance.todayStats.investmentIncome += check.franchiseUpfrontFee;
+
+    const baseName = state.branches[0]?.name.split('(')[0].trim() || 'Meşhur Dönerci';
+    const franchiseLabel = `◆ ${baseName} Bayi (${prov.name} - ${district.name})`;
+    const initialRep = check.estimatedInitialRep;
+
+    const newBranch: BranchState = {
+      id: `franchise_${provinceId}_${district.id}_${Date.now()}`,
+      name: franchiseLabel,
+      provinceId: prov.id,
+      provinceName: prov.name,
+      districtId: district.id,
+      districtName: district.name,
+      neighborhoodType: district.neighborhoodType,
+      isHeadquarters: false,
+      isFranchise: true,
+      franchiseRoyaltyPct: check.franchiseRoyaltyPct,
+      franchiseViolations: 0,
+      regionName: prov.region,
+      neighborhoodReputation: initialRep,
+      hygiene: 84,
+      decorScore: 18,
+      seatingCapacity: 8,
+      dailyRentBase: district.dailyRentBase,
+      logisticsMultiplier: check.logisticsMultiplier,
+      openingCostPaid: 0,
+      staffCount: 2,
+      stockHealthPct: 90,
+      todayRevenue: 0,
+      todayIngredientCost: 0,
+      todayRentAndTax: 0,
+      todayLogisticsCost: 0,
+      todayStaffCost: 0,
+      todayNetProfit: 0,
+      todayCustomers: 0,
+      totalCumulativeProfit: check.franchiseUpfrontFee
+    };
+
+    state.branches.push(newBranch);
+    state.storyLog.push({
+      day: state.time.day,
+      title: `🤝 Yeni Bayilik (Franchise) Verildi: ${district.name}`,
+      text: `${prov.name}/${district.name} bayisinden +${check.franchiseUpfrontFee.toLocaleString('tr-TR')} ₺ peşin isim hakkı alındı. Günlük cirodan %${check.franchiseRoyaltyPct} pay kasaya akacak.`
+    });
+
+    ReputationSystem.syncReputations(state);
+    bus.emit('toast:show', {
+      title: `◆ Bayilik Sözleşmesi İmzalandı!`,
+      text: `${prov.name} - ${district.name} bayisinden +${check.franchiseUpfrontFee.toLocaleString('tr-TR')} ₺ peşin isim hakkı kasaya girdi!`,
+      type: 'success'
+    });
+    bus.emit('state:updated', state);
+    return { ok: true, msg: `${franchiseLabel} sözleşmesi imzalandı!` };
+  }
+
+  /**
+   * Zarardaki veya nakit ihtiyacı olan bir şubeyi kapatır veya bayilik sözleşmesini fesheder.
    */
   public static closeOrSellBranch(state: GameState, branchId: string): { ok: boolean; msg: string } {
     const idx = state.branches.findIndex((b) => b.id === branchId);
@@ -335,10 +540,34 @@ export class BranchSystem {
       return { ok: false, msg: 'Ana Merkez Şube kapatılamaz!' };
     }
 
+    // Atanmış şube müdürü varsa boşa çıkar
+    if (branch.managerId && state.chainManagement?.managers) {
+      const mgr = state.chainManagement.managers.find((m) => m.id === branch.managerId);
+      if (mgr) {
+        mgr.assignedId = undefined;
+        mgr.status = 'atanmamis';
+      }
+    }
+
+    if (branch.isFranchise) {
+      state.reputation.countryReputation = Math.max(
+        15,
+        state.reputation.countryReputation - MANAGEMENT_CONFIG.franchiseTerminationPenaltyRep
+      );
+      state.branches.splice(idx, 1);
+      ReputationSystem.syncReputations(state);
+      bus.emit('toast:show', {
+        title: `📜 Bayilik Sözleşmesi Feshedildi`,
+        text: `${branch.districtName} bayisinin tabelası indirildi.`,
+        type: 'warning'
+      });
+      bus.emit('state:updated', state);
+      return { ok: true, msg: 'Bayilik sözleşmesi feshedildi.' };
+    }
+
     const refund = Math.round(branch.openingCostPaid * EXPANSION_CONFIG.branchCloseRefundRatio);
     state.finance.cash += refund;
 
-    // İtibar etkisi
     const prevCityRep = state.reputation.cityReputations[branch.provinceId] || 55;
     state.reputation.cityReputations[branch.provinceId] = Math.max(
       15,
@@ -349,7 +578,6 @@ export class BranchSystem {
       state.reputation.countryReputation + EXPANSION_CONFIG.branchCloseBrandRepPenalty
     );
 
-    // Eğer kapatılan şube şu an aktif yönetilen şubeyse merkeze dön
     if (state.activeBranchId === branch.id) {
       this.switchActiveBranch(state, state.branches[0].id);
     }
@@ -372,15 +600,17 @@ export class BranchSystem {
   }
 
   /**
-   * Gün içinde arka plandaki diğer şubelerin müşteri, satış, lojistik ve hijyen akışını simüle eder.
+   * Faz 1.5, Faz 3, Faz 4, Faz 5, Faz 6:
+   * Arka plandaki şubeleri ve bayileri tek tek müşteri zarı atmak yerine O(1) özet formülle simüle eder.
+   * Müdür kalitesi, politika, bölgesel kültür, depo indirimi, kampanya ve rakip baskısı doğrudan hesaba katılır.
    */
   public static simulateBackgroundBranchesIntraday(state: GameState, minutesDelta: number): void {
     if (!state.branches || state.branches.length <= 1) return;
     const inf = state.finance.inflationIndex;
+    const cm = state.chainManagement;
 
     for (const b of state.branches) {
-      if (b.id === state.activeBranchId) {
-        // Aktif şubenin verilerini canlı eşitle
+      if (b.id === state.activeBranchId && !b.isFranchise) {
         b.todayRevenue = state.finance.todayStats.revenue;
         b.todayIngredientCost = state.finance.todayStats.ingredientCost;
         b.todayCustomers = state.finance.todayStats.customersServed;
@@ -389,90 +619,244 @@ export class BranchSystem {
         continue;
       }
 
+      const prov = TURKEY_PROVINCES.find((p) => p.id === b.provinceId);
+      const regionName = b.regionName || prov?.region || 'Marmara';
       const districts = getDistrictsForProvince(b.provinceId);
       const distDef = districts.find((d) => d.id === b.districtId);
-      const potentialFactor = (distDef?.customerPotential || 80) / 85;
-      const repFactor = 0.6 + (b.neighborhoodReputation / 100) * 0.8;
-      const hygFactor = b.hygiene >= 70 ? 1.05 : b.hygiene >= 50 ? 0.8 : 0.45;
 
-      const arrivalProb = 0.032 * minutesDelta * potentialFactor * repFactor * hygFactor;
-      if (Math.random() < arrivalProb) {
-        const avgTicket = Math.round(135 * inf * (0.9 + (b.neighborhoodReputation / 100) * 0.25));
-        const ingCost = Math.round(avgTicket * 0.36);
+      // 1. Yönetici (Şube Müdürü + Bölge Müdürü) etkisi
+      const branchMgr = cm?.managers?.find((m) => m.id === b.managerId || (m.level === 'sube' && m.assignedId === b.id));
+      const regionalMgr = cm?.managers?.find((m) => m.level === 'bolge' && m.assignedId === regionName);
+      const mgrSkillFactor = branchMgr
+        ? 0.92 + (branchMgr.skill / 100) * 0.35
+        : b.isFranchise
+          ? 0.98
+          : 1 - MANAGEMENT_CONFIG.unmanagedBranchEfficiencyPenalty;
+      const regionalBonus = regionalMgr ? 1 + (regionalMgr.skill / 100) * 0.12 : 1.0;
 
-        b.todayCustomers += 1;
-        b.todayRevenue += avgTicket;
-        b.todayIngredientCost += ingCost;
+      // 2. Bölgesel kültür ve mevsim (turizm) etkisi
+      const culture = REGIONAL_CULTURE_MODIFIERS[regionName] || REGIONAL_CULTURE_MODIFIERS['Marmara'];
+      const seasonalBoost = state.time.season === 'Yaz' ? culture.summerTourismBoost : 1.0;
+      const cultureDemandMult =
+        ((culture.meatPreferenceBonus + culture.chickenPreferenceBonus + culture.spicyAndDessertBonus) / 3) *
+        seasonalBoost;
 
-        state.finance.cash += avgTicket - ingCost;
-        state.quests.lifetimeCustomersServed = (state.quests.lifetimeCustomersServed || 0) + 1;
+      // 3. Aktif reklam kampanyası ve rakip fiyat savaşı etkisi
+      let campaignMult = 1.0;
+      if (cm?.activeCampaigns) {
+        for (const camp of cm.activeCampaigns) {
+          if (
+            camp.scope === 'ulke' ||
+            (camp.scope === 'sehir' && camp.targetId === b.provinceId) ||
+            (camp.scope === 'mahalle' && camp.targetId === b.id)
+          ) {
+            campaignMult += camp.demandBonusPct;
+          }
+        }
+      }
 
-        // Şube hijyen ve itibar değişimi
-        b.hygiene = Math.max(25, Math.round((b.hygiene - 0.14) * 10) / 10);
-        if (b.hygiene >= 72) {
-          b.neighborhoodReputation = Math.min(100, Math.round((b.neighborhoodReputation + 0.08) * 10) / 10);
-        } else if (b.hygiene < 50) {
-          b.neighborhoodReputation = Math.max(15, Math.round((b.neighborhoodReputation - 0.18) * 10) / 10);
+      const rival = LOCAL_RIVAL_CHAINS.find((r) => r.homeRegion === regionName);
+      const rivalPressure =
+        cm?.rivalPriceWarDaysLeft && cm.rivalPriceWarDaysLeft > 0
+          ? cm.rivalCounterStance === 'kampanya' || cm.rivalCounterStance === 'fiyat_kir'
+            ? 0.97
+            : 1 - (rival?.pricePressurePct || 0.08)
+          : 1.0;
+
+      // 4. O(1) Beklenen müşteri akışı (minutesDelta üzerinden deterministik + hafif varyans)
+      const potentialFactor = (distDef?.customerPotential || 80) / 82;
+      const repFactor = 0.62 + (b.neighborhoodReputation / 100) * 0.78;
+      const hygFactor = b.hygiene >= 72 ? 1.06 : b.hygiene >= 52 ? 0.84 : 0.48;
+      const stockFactor = b.stockHealthPct >= 40 ? 1.0 : 0.55;
+
+      const expectedRate =
+        0.036 *
+        minutesDelta *
+        potentialFactor *
+        repFactor *
+        hygFactor *
+        stockFactor *
+        mgrSkillFactor *
+        regionalBonus *
+        cultureDemandMult *
+        campaignMult *
+        rivalPressure;
+
+      // Küçük zaman adımlarında olasılıksal, büyük adımlarda tam sayı + kesir
+      const wholeCustomers = Math.floor(expectedRate);
+      const fracCustomer = Math.random() < expectedRate - wholeCustomers ? 1 : 0;
+      const customersServedNow = wholeCustomers + fracCustomer;
+
+      if (customersServedNow > 0) {
+        // Politika fiyat çarpanı
+        const branchPol = cm?.branchPolicies?.[b.id];
+        const regionPol = cm?.regionPolicies?.[regionName];
+        const priceMode = branchPol?.pricePolicy || regionPol?.pricePolicy || cm?.chainPolicy?.pricePolicy || 'enflasyon_takip';
+        const pricePolicyMult = priceMode === 'mahalle_dinamik' ? 1.08 : priceMode === 'enflasyon_takip' ? 1.02 : 0.93;
+
+        const avgTicket = Math.round(
+          138 * inf * pricePolicyMult * (0.9 + (b.neighborhoodReputation / 100) * 0.26)
+        );
+        const stepRevenue = avgTicket * customersServedNow;
+
+        // Merkez Depo toplu alım indirimi ve tedarik krizi etkisi
+        const warehouseDiscount = cm?.warehouse?.built ? cm.warehouse.bulkDiscountPct : 0;
+        const crisisSurcharge = cm?.warehouse?.supplyCrisisDaysLeft && cm.warehouse.supplyCrisisDaysLeft > 0 ? 0.14 : 0;
+        const wasteReduction = branchMgr ? (branchMgr.skill / 100) * 0.05 : 0;
+        const costRatio = Math.max(0.24, 0.36 * (1 - warehouseDiscount + crisisSurcharge - wasteReduction));
+        const stepIngCost = Math.round(stepRevenue * costRatio);
+
+        b.todayCustomers += customersServedNow;
+        b.todayRevenue += stepRevenue;
+        b.todayIngredientCost += stepIngCost;
+        state.quests.lifetimeCustomersServed = (state.quests.lifetimeCustomersServed || 0) + customersServedNow;
+
+        if (b.isFranchise) {
+          // Bayilik (Franchise): sadece % royalty payı kasaya net gelir olarak girer
+          const royaltyPct = (b.franchiseRoyaltyPct || MANAGEMENT_CONFIG.franchiseDefaultRoyaltyPct) / 100;
+          const royaltyGain = Math.round(stepRevenue * royaltyPct);
+          b.todayNetProfit += royaltyGain;
+          state.finance.cash += royaltyGain;
+        } else {
+          state.finance.cash += stepRevenue - stepIngCost;
         }
 
-        // Skandal kontrolü
-        ReputationSystem.checkBranchScandal(state, b.name, b.provinceId, b.hygiene);
+        // Müdür varsa hijyeni korur, müdürsüz şube daha hızlı kirlenir
+        const hygieneDrop = branchMgr
+          ? Math.max(0.03, 0.12 - (branchMgr.skill / 100) * 0.08)
+          : 0.17;
+        b.hygiene = Math.max(25, Math.round((b.hygiene - hygieneDrop * customersServedNow) * 10) / 10);
+
+        if (b.hygiene >= 74) {
+          b.neighborhoodReputation = Math.min(100, Math.round((b.neighborhoodReputation + 0.07 * customersServedNow) * 10) / 10);
+        } else if (b.hygiene < 52) {
+          b.neighborhoodReputation = Math.max(15, Math.round((b.neighborhoodReputation - 0.18 * customersServedNow) * 10) / 10);
+        }
+
+        // Skandal kontrolü (müdür ve hijyen standardı etkili)
+        const hygStd = branchPol?.hygieneStandard || regionPol?.hygieneStandard || cm?.chainPolicy?.hygieneStandard || 'normal';
+        ReputationSystem.checkBranchScandal(
+          state,
+          b.name,
+          b.provinceId,
+          b.hygiene,
+          branchMgr?.skill || 0,
+          hygStd
+        );
       }
     }
   }
 
   /**
-   * Gün sonunda tüm şubelerin kira, vergi, uzak şehir lojistik, personel ve holding yönetim giderlerini keser.
+   * Gün sonunda tüm şubelerin kira, vergi, uzak şehir lojistik, personel, müdür ve holding yönetim giderlerini keser.
+   * Müdür ve politika kurulu zincirlerde organizasyon indirimi uygulanır.
    */
   public static settleAllBranchesEndOfDay(state: GameState) {
     this.saveActiveToBranch(state);
     const inf = state.finance.inflationIndex;
-    const branchCount = state.branches.length;
+    const cm = state.chainManagement;
 
     let totalChainRevenue = 0;
     let totalChainExpenses = 0;
 
     state.branches.forEach((b, index) => {
+      if (b.isFranchise) {
+        // Bayi kendi kirasını ve personelini öder; oyuncuya sadece royalty kârı yazar
+        const royaltyPct = (b.franchiseRoyaltyPct || MANAGEMENT_CONFIG.franchiseDefaultRoyaltyPct) / 100;
+        const royaltyProfit = Math.round(b.todayRevenue * royaltyPct);
+        b.todayRentAndTax = 0;
+        b.todayLogisticsCost = 0;
+        b.todayStaffCost = 0;
+        b.todayNetProfit = royaltyProfit;
+        b.totalCumulativeProfit += royaltyProfit;
+        totalChainRevenue += royaltyProfit;
+        return;
+      }
+
+      const prov = TURKEY_PROVINCES.find((p) => p.id === b.provinceId);
+      const regionName = b.regionName || prov?.region || 'Marmara';
+      const branchMgr = cm?.managers?.find((m) => m.id === b.managerId || (m.level === 'sube' && m.assignedId === b.id));
+      const regionalMgr = cm?.managers?.find((m) => m.level === 'bolge' && m.assignedId === regionName);
+
       const rent = Math.round(b.dailyRentBase * inf);
       const tax = Math.round(b.todayRevenue * EXPANSION_CONFIG.corporateTaxRate);
-      // Uzak şehirlerde tedarik/nakliye maliyeti daha yüksek
-      const logistics = b.isHeadquarters
-        ? Math.round(120 * inf)
-        : Math.round((220 * b.logisticsMultiplier + b.todayIngredientCost * EXPANSION_CONFIG.remoteCityLogisticsBaseRate * (b.logisticsMultiplier - 0.85)) * inf);
 
-      // Şube sayısı arttıkça genel yönetim/holding yükü artar
-      const holdingOverhead = b.isHeadquarters
-        ? 0
+      // Merkez Depo soğuk zincir indirimi
+      const warehouseColdReduction = cm?.warehouse?.built ? cm.warehouse.coldChainReductionPct : 0;
+      const effectiveLogMult = Math.max(1.0, 1 + (b.logisticsMultiplier - 1) * (1 - warehouseColdReduction));
+
+      const logistics = b.isHeadquarters
+        ? Math.round(110 * inf)
         : Math.round(
-            EXPANSION_CONFIG.holdingOverheadPerBranch *
-              (1 + index * EXPANSION_CONFIG.branchComplexityMultiplier) *
+            (200 * effectiveLogMult +
+              b.todayIngredientCost * EXPANSION_CONFIG.remoteCityLogisticsBaseRate * (effectiveLogMult - 0.85)) *
               inf
           );
 
+      // Faz 1.5: Şube sayısı arttıkça holding yönetim yükü artar, ANCAK şube müdürü ve bölge müdürü atanmışsa organizasyon indirimi uygulanır!
+      let rawHoldingOverhead = b.isHeadquarters
+        ? 0
+        : (MANAGEMENT_CONFIG.holdingOverheadPerExtraBranchBase +
+            index * MANAGEMENT_CONFIG.holdingQuadraticFactorBase) *
+          (1 + index * EXPANSION_CONFIG.branchComplexityMultiplier) *
+          inf;
+
+      if (branchMgr) {
+        rawHoldingOverhead *= 1 - MANAGEMENT_CONFIG.managedBranchOverheadDiscountPct;
+      }
+      if (regionalMgr) {
+        rawHoldingOverhead *= 1 - MANAGEMENT_CONFIG.regionalManagerOverheadDiscountPct;
+      }
+      const holdingOverhead = Math.round(rawHoldingOverhead);
+
       const staffCost = b.isHeadquarters
-        ? 0 // Merkez şube personeli zaten ana finishDay içinde kesiliyor
-        : Math.round(b.staffCount * 750 * inf);
+        ? 0 // Merkez şube personeli ana finishDay içinde kesiliyor
+        : Math.round(b.staffCount * (MANAGEMENT_CONFIG.baseChefMonthlySalary / 30) * inf);
+
+      const mgrDailySalary = branchMgr ? Math.round((branchMgr.baseMonthlySalary / 30) * inf) : 0;
 
       b.todayRentAndTax = rent + tax + holdingOverhead;
       b.todayLogisticsCost = logistics;
-      b.todayStaffCost = staffCost;
+      b.todayStaffCost = staffCost + mgrDailySalary;
 
       const branchTotalExpense = b.todayIngredientCost + b.todayRentAndTax + b.todayLogisticsCost + b.todayStaffCost;
       b.todayNetProfit = b.todayRevenue - branchTotalExpense;
       b.totalCumulativeProfit += b.todayNetProfit;
 
-      // Arka plan şubelerinin kira, vergi, lojistik ve personel giderini kasadan düş
       if (!b.isHeadquarters) {
         const nonIngDeduction = b.todayRentAndTax + b.todayLogisticsCost + b.todayStaffCost;
         state.finance.cash -= nonIngDeduction;
         state.finance.todayStats.operatingCost += nonIngDeduction;
-        // Sabah temizliğiyle arka plan şubelerinin hijyeni kısmen toparlanır
-        b.hygiene = Math.min(95, b.hygiene + 16);
+
+        // Müdürlü şube sabah temizliğini politikaya göre tam yapar, müdürsüz şube hijyen kaybeder
+        if (branchMgr) {
+          b.hygiene = Math.min(96, b.hygiene + 18 + Math.round(branchMgr.skill * 0.08));
+        } else {
+          b.hygiene = Math.max(35, Math.min(82, b.hygiene + 6 - MANAGEMENT_CONFIG.unmanagedBranchHygieneDecayPerDay));
+        }
       }
 
       totalChainRevenue += b.todayRevenue;
       totalChainExpenses += branchTotalExpense;
     });
+
+    // Bölge müdürleri ve Merkez Depo günlük bakım gideri
+    if (cm) {
+      let hqExtraCost = 0;
+      for (const m of cm.managers) {
+        if (m.level === 'bolge' && m.assignedId) {
+          hqExtraCost += Math.round((m.baseMonthlySalary / 30) * inf);
+        }
+      }
+      if (cm.warehouse?.built) {
+        hqExtraCost += Math.round(MANAGEMENT_CONFIG.warehouseDailyMaintenanceBase * cm.warehouse.level * inf);
+      }
+      if (hqExtraCost > 0) {
+        state.finance.cash -= hqExtraCost;
+        state.finance.todayStats.operatingCost += hqExtraCost;
+        totalChainExpenses += hqExtraCost;
+      }
+    }
 
     ReputationSystem.syncReputations(state);
 

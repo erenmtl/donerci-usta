@@ -9,6 +9,14 @@ export type DayPhase = 'sabah_hazirlik' | 'acilis' | 'ogle_yogunlugu' | 'aksam_s
 export type CustomerType = 'ogrenci' | 'isci' | 'aile' | 'turist' | 'esnaf';
 export type DifficultyLevel = 'kolay' | 'normal' | 'zor';
 
+export type ManagementTier = 'usta' | 'mudur' | 'holding';
+export type ManagerLevel = 'sube' | 'bolge';
+export type ManagerStatus = 'aktif' | 'atanmamis' | 'egitimde';
+export type PricePolicyMode = 'sabit' | 'enflasyon_takip' | 'mahalle_dinamik';
+export type HygieneStandardMode = 'dusuk' | 'normal' | 'yuksek';
+export type SupplierTierMode = 'ucuz' | 'standart' | 'kaliteli';
+export type MapHeatmapMode = 'standard' | 'profit' | 'reputation';
+
 export interface FamilyMember {
   id: string;
   name: string;
@@ -154,6 +162,11 @@ export interface BranchState {
   districtName: string;
   neighborhoodType: string;
   isHeadquarters: boolean;
+  isFranchise?: boolean;          // Faz 5: true ise Bayilik (Franchise), false/undefined ise Öz Şube
+  franchiseRoyaltyPct?: number;   // Faz 5: Günlük cirodan alınan % pay (örn: 10)
+  franchiseViolations?: number;   // Faz 5: Bayi kalite/hijyen ihlal sayacı
+  managerId?: string;             // Faz 1.2: Atanmış Şube Müdürü ID'si
+  regionName?: string;            // Faz 1.1: Coğrafi bölge adı (Marmara, Ege vb.)
   neighborhoodReputation: number; // 1. Katman: Mahalle/İlçe İtibarı (0-100)
   hygiene: number;
   decorScore: number;
@@ -174,6 +187,93 @@ export interface BranchState {
   snapshot?: BranchSnapshot;
 }
 
+export interface ManagerState {
+  id: string;
+  name: string;
+  title: string;
+  level: ManagerLevel;           // 'sube' | 'bolge'
+  skill: number;                 // 0 - 100
+  honesty: number;               // 0 - 100 (dürüstlük; düşükse zimmet riski)
+  loyalty: number;               // 0 - 100 (sadakat; düşükse istifa/transfer riski)
+  experience: number;            // Görev yapılan gün sayısı
+  baseMonthlySalary: number;     // Enflasyonla çarpılacak baz maaş
+  assignedId?: string;           // Şube ID'si veya Bölge adı ('Marmara' vb.)
+  status: ManagerStatus;
+  isFamily?: boolean;            // Aileden yetişen çocuk mu?
+  familyMemberId?: string;
+  embezzledTotal?: number;       // Teftiş edilene kadar gizli biriken zimmet
+}
+
+export interface PolicyConfig {
+  pricePolicy: PricePolicyMode;
+  autoOrderThreshold: number;    // Stok % kaçın altına inince sipariş verilsin (örn: 45)
+  supplierTier: SupplierTierMode;
+  stockBudgetCeilingBase: number; // Günlük otomatik alım baz tavanı (enflasyonla çarpılır)
+  hygieneStandard: HygieneStandardMode;
+  targetHeadcount: number;
+  raiseRatePct: number;
+  spendingLimitBase: number;     // Müdürün onaysız harcayabileceği baz limit
+}
+
+export interface PendingDecision {
+  id: string;
+  dayCreated: number;
+  branchId?: string;
+  regionName?: string;
+  managerId?: string;
+  category: 'butce' | 'maas_zammi' | 'kira_yenileme' | 'personel' | 'kriz' | 'bayi_ihlal';
+  title: string;
+  description: string;
+  cost: number;                  // Onaylanırsa kasadan çıkacak güncel (enflasyonlu) tutar
+  approveEffectSummary: string;
+  rejectEffectSummary: string;
+}
+
+export interface CentralWarehouseState {
+  built: boolean;
+  level: number;                 // 0 = yok, 1 = Bölgesel Soğuk Zincir Depo, 2 = Ulusal Lojistik & Et Entegre Üssü
+  provinceId: string;
+  bulkDiscountPct: number;
+  coldChainReductionPct: number;
+  supplyCrisisDaysLeft: number;
+  supplyCrisisTitle?: string;
+}
+
+export interface ActiveBrandCampaign {
+  campaignId: string;
+  name: string;
+  scope: 'mahalle' | 'sehir' | 'ulke';
+  targetId?: string;             // branchId veya provinceId
+  daysRemaining: number;
+  demandBonusPct: number;
+}
+
+export interface ExecutiveReportEntry {
+  day: number;
+  summaryText: string;
+  totalBranches: number;
+  totalFranchises: number;
+  managedBranches: number;
+  totalNetProfit: number;
+  alertsCount: number;
+}
+
+export interface ChainManagementState {
+  tier: ManagementTier;          // 'usta' | 'mudur' | 'holding'
+  highestTierNotified: ManagementTier;
+  managers: ManagerState[];
+  candidatePool: ManagerState[];
+  chainPolicy: PolicyConfig;
+  regionPolicies: Record<string, Partial<PolicyConfig>>;
+  branchPolicies: Record<string, Partial<PolicyConfig>>;
+  pendingDecisions: PendingDecision[];
+  warehouse: CentralWarehouseState;
+  activeCampaigns: ActiveBrandCampaign[];
+  executiveReports: ExecutiveReportEntry[];
+  rivalPriceWarDaysLeft: number;
+  rivalCounterStance: 'kalite' | 'fiyat_kir' | 'kampanya';
+}
+
 export interface ReputationHierarchyState {
   neighborhoodReputation: number;          // Aktif şubenin mahalle/ilçe itibarı
   cityReputations: Record<string, number>; // 2. Katman: İl bazlı şehir itibarı (istanbul: 65, ankara: 52 vb.)
@@ -192,9 +292,11 @@ export interface MapViewState {
   level: 'turkey' | 'city' | 'branch';
   selectedProvinceId: string;
   selectedDistrictId: string;
+  heatmapMode?: MapHeatmapMode; // Faz 2: 'standard' | 'profit' | 'reputation'
 }
 
 export interface GameState {
+  saveVersion: number;
   initialized: boolean;
   difficulty: DifficultyLevel;
   theme: 'dark' | 'light';
@@ -289,10 +391,11 @@ export interface GameState {
   unlockedAchievements: string[];
   storyLog: Array<{ day: number; title: string; text: string }>;
 
-  // BAYİLEŞME, GÖREV, 3 KATMANLI İTİBAR VE HARİTA SİSTEMİ
+  // BAYİLEŞME, GÖREV, 3 KATMANLI İTİBAR, HARİTA VE ZİNCİR YÖNETİMİ
   activeBranchId: string;
   branches: BranchState[];
   reputation: ReputationHierarchyState;
   quests: QuestProgressState;
   mapView: MapViewState;
+  chainManagement: ChainManagementState;
 }

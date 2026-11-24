@@ -1,6 +1,7 @@
 // ============================================================================
 // GERÇEK COĞRAFİ 81 İL TÜRKİYE HARİTASI VE 39 İLÇE İSTANBUL HARİTASI ÇİZİCİ
-// (MapRenderer.ts - Gerçek Poligon Sınırları ile İnteraktif SVG Harita)
+// (MapRenderer.ts - Isı Haritaları: Standart / Kâr Isı Haritası / İtibar Isı Haritası,
+//  Öz Şube ★ vs Bayilik ◆ ayrımı)
 // ============================================================================
 
 import { TURKEY_PROVINCES, getDistrictsForProvince } from '../data/turkey_map.js';
@@ -14,44 +15,83 @@ export class MapRenderer {
   }
 
   /**
+   * Faz 2: Seçilen ısı haritası katmanına ('standard' | 'profit' | 'reputation') göre renk üretir.
+   */
+  static getHeatmapColor(
+    mode,
+    hasCompanyBranch,
+    hasFranchise,
+    isSelected,
+    reputationVal,
+    profitVal,
+    defaultNeutralFill
+  ) {
+    if (mode === 'reputation') {
+      if (reputationVal >= 75) return { fill: '#146c4e', stroke: '#38d39f' };
+      if (reputationVal >= 58) return { fill: '#1f5f78', stroke: '#63b3ed' };
+      if (reputationVal >= 45) return { fill: '#75531a', stroke: '#f5c76b' };
+      return { fill: '#6b222a', stroke: '#fc8181' };
+    }
+
+    if (mode === 'profit') {
+      if (!hasCompanyBranch && !hasFranchise) {
+        return {
+          fill: isSelected ? '#75531a' : 'rgba(20, 36, 52, 0.55)',
+          stroke: isSelected ? '#f5c76b' : '#2c465e'
+        };
+      }
+      if (profitVal >= 2000) return { fill: '#117a56', stroke: '#38d39f' };
+      if (profitVal >= 0) return { fill: '#2b6a4e', stroke: '#68d391' };
+      return { fill: '#7f1d28', stroke: '#fc8181' };
+    }
+
+    // Standart görünüm: Öz Şube = Zümrüt Yeşili, Bayi (Franchise) = Kehribar/Turuncu, Seçili = Altın
+    if (hasCompanyBranch) return { fill: '#177e5d', stroke: '#38d39f' };
+    if (hasFranchise) return { fill: '#8a5213', stroke: '#f6ad55' };
+    if (isSelected) return { fill: '#9c6b19', stroke: '#f5c76b' };
+    return { fill: defaultNeutralFill, stroke: '#355470' };
+  }
+
+  /**
    * Gerçek Coğrafi 81 İl Türkiye Haritası (SVG Poligon)
-   * Şube olan iller zümrüt yeşili (#38d39f), seçili il altın (#f5c76b), diğerleri nötr arduvaz.
    */
   static renderTurkeyMapSVG(state) {
     const selectedProvId = state.mapView?.selectedProvinceId || 'istanbul';
+    const heatmapMode = state.mapView?.heatmapMode || 'standard';
     const inf = state.finance.inflationIndex;
 
-    // Seçili ili en son çizmek yerine tüm poligonları çizip etiketleri üst katmana koyuyoruz
     const polygonsHtml = TURKEY_PROVINCES.map((prov) => {
       const geo = TURKEY_REAL_SVG_PATHS[prov.id];
       if (!geo) return '';
 
-      const branchCount = (state.branches || []).filter((b) => b.provinceId === prov.id).length;
+      const provBranches = (state.branches || []).filter((b) => b.provinceId === prov.id);
+      const companyCount = provBranches.filter((b) => !b.isFranchise).length;
+      const franchiseCount = provBranches.filter((b) => Boolean(b.isFranchise)).length;
+      const branchCount = provBranches.length;
       const hasBranch = branchCount > 0;
       const isSelected = prov.id === selectedProvId;
       const cityRep = Math.round(state.reputation?.cityReputations?.[prov.id] || 48);
+      const provProfit = provBranches.reduce((s, b) => s + b.todayNetProfit, 0);
       const openCost = Math.round(prov.openingCostBase * inf);
 
       const repAlpha = (0.48 + (cityRep / 100) * 0.42).toFixed(2);
-      const fillColor = hasBranch
-        ? '#177e5d'
-        : isSelected
-        ? '#9c6b19'
-        : `rgba(26, 49, 70, ${repAlpha})`;
-
-      const strokeColor = hasBranch
-        ? '#38d39f'
-        : isSelected
-        ? '#f5c76b'
-        : '#355470';
+      const colors = this.getHeatmapColor(
+        heatmapMode,
+        companyCount > 0,
+        franchiseCount > 0,
+        isSelected,
+        cityRep,
+        provProfit,
+        `rgba(26, 49, 70, ${repAlpha})`
+      );
 
       const strokeW = hasBranch || isSelected ? '1.8' : '0.85';
 
       const tipLines = [
         `Bölge: ${prov.region} (Plaka: ${prov.plate})`,
         `🏙️ Şehir İtibarı: ${cityRep}/100`,
-        `🏪 Aktif Şube Sayısı: ${branchCount} Şube`,
-        `💵 Baz Açılış Maliyeti: ${openCost.toLocaleString('tr-TR')} ₺`,
+        `🏪 Lokasyonlar: ${companyCount} Öz Şube (★) • ${franchiseCount} Bayi (◆)`,
+        hasBranch ? `💰 Günlük İl Net Kârı: ${provProfit >= 0 ? '+' : ''}${Math.round(provProfit).toLocaleString('tr-TR')} ₺` : `💵 Baz Açılış Maliyeti: ${openCost.toLocaleString('tr-TR')} ₺`,
         `🚚 Lojistik Uzaklık Çarpanı: x${prov.logisticsDistanceFactor.toFixed(2)}`
       ].join('|');
 
@@ -59,23 +99,34 @@ export class MapRenderer {
         <path class="chart-hover-target"
               style="cursor:pointer;transition:fill 0.15s ease;"
               d="${geo.d}"
-              fill="${fillColor}"
-              stroke="${strokeColor}"
+              fill="${colors.fill}"
+              stroke="${colors.stroke}"
               stroke-width="${strokeW}"
               stroke-linejoin="round"
               data-map-province="${prov.id}"
               data-chart-tip-title="📍 ${prov.plate} ${prov.name}"
               data-chart-tip-lines="${this.esc(tipLines)}"
-              data-chart-tip-color="${hasBranch ? '#38d39f' : '#f5c76b'}" />
+              data-chart-tip-color="${colors.stroke}" />
       `;
     }).join('');
 
     const labelsHtml = TURKEY_PROVINCES.map((prov) => {
       const geo = TURKEY_REAL_SVG_PATHS[prov.id];
       if (!geo) return '';
-      const branchCount = (state.branches || []).filter((b) => b.provinceId === prov.id).length;
-      const hasBranch = branchCount > 0;
+      const provBranches = (state.branches || []).filter((b) => b.provinceId === prov.id);
+      const companyCount = provBranches.filter((b) => !b.isFranchise).length;
+      const franchiseCount = provBranches.filter((b) => Boolean(b.isFranchise)).length;
+      const hasBranch = provBranches.length > 0;
       const isSelected = prov.id === selectedProvId;
+
+      const marker =
+        companyCount > 0 && franchiseCount > 0
+          ? `★${companyCount}◆${franchiseCount}`
+          : companyCount > 0
+            ? `★${companyCount}`
+            : franchiseCount > 0
+              ? `◆${franchiseCount}`
+              : '';
 
       return `
         <g style="pointer-events:none;">
@@ -86,7 +137,7 @@ export class MapRenderer {
                 font-weight="900"
                 text-anchor="middle"
                 style="text-shadow: 0 1px 3px rgba(0,0,0,0.9);">
-            ${prov.plate}${hasBranch ? `★${branchCount}` : ''}
+            ${prov.plate}${marker}
           </text>
           <text x="${geo.cx}" y="${geo.cy + 7.5}"
                 fill="${hasBranch || isSelected ? '#ffffff' : '#d0deeb'}"
@@ -121,38 +172,39 @@ export class MapRenderer {
 
   static renderLogisticsLines(state) {
     if (!state.branches || state.branches.length <= 1) return '';
-    const hq = state.branches[0];
-    const hqGeo = TURKEY_REAL_SVG_PATHS[hq.provinceId];
+    const whProv = state.chainManagement?.warehouse?.built
+      ? state.chainManagement.warehouse.provinceId
+      : state.branches[0].provinceId;
+    const hqGeo = TURKEY_REAL_SVG_PATHS[whProv];
     if (!hqGeo) return '';
 
     const uniqueProvs = Array.from(new Set(state.branches.map((b) => b.provinceId)));
     return uniqueProvs
-      .filter((pId) => pId !== hq.provinceId)
+      .filter((pId) => pId !== whProv)
       .map((pId) => {
         const targetGeo = TURKEY_REAL_SVG_PATHS[pId];
         if (!targetGeo) return '';
         return `
           <line x1="${hqGeo.cx}" y1="${hqGeo.cy}"
                 x2="${targetGeo.cx}" y2="${targetGeo.cy}"
-                stroke="#f5c76b" stroke-width="2" stroke-dasharray="6 4" opacity="0.85" />
+                stroke="${state.chainManagement?.warehouse?.built ? '#38d39f' : '#f5c76b'}"
+                stroke-width="2" stroke-dasharray="6 4" opacity="0.85" />
         `;
       })
       .join('');
   }
 
   /**
-   * Şehir İlçe Haritası:
-   * - İstanbul için 39 İlçenin Gerçek Coğrafi Sınır Poligonlarını (ISTANBUL_REAL_SVG_PATHS) çizer!
-   * - Diğer iller için il sınır poligonunu arka plana alıp ilçeleri üzerine yerleştirir.
+   * Şehir İlçe Haritası (İstanbul 39 ilçe gerçek poligon + diğer büyük şehirler detaylı ilçe görünümü)
    */
   static renderCityDistrictMapSVG(state, provinceId) {
     const prov = TURKEY_PROVINCES.find((p) => p.id === provinceId) || TURKEY_PROVINCES[0];
     const districts = getDistrictsForProvince(provinceId);
     const selectedDistId = state.mapView?.selectedDistrictId || districts[0]?.id;
+    const heatmapMode = state.mapView?.heatmapMode || 'standard';
     const inf = state.finance.inflationIndex;
 
     if (provinceId === 'istanbul') {
-      // İstanbul için Tam Görünüm (39 İlçe) veya Boğaz & Merkez Yakınlaştırılmış Görünüm
       const viewBox = this.istanbulZoomCenter ? '320 195 365 245' : '0 0 960 460';
       const fontSizeBase = this.istanbulZoomCenter ? 6.2 : 8.5;
 
@@ -162,34 +214,35 @@ export class MapRenderer {
           if (!geo) return '';
 
           const branchHere = (state.branches || []).find((b) => b.districtId === dist.id);
+          const hasCompany = Boolean(branchHere && !branchHere.isFranchise);
+          const hasFranchise = Boolean(branchHere && branchHere.isFranchise);
           const hasBranch = Boolean(branchHere);
           const isSelected = dist.id === selectedDistId;
           const openCost = Math.round(dist.openingCostBase * inf);
           const rent = Math.round(dist.dailyRentBase * inf);
+          const distRep = branchHere ? branchHere.neighborhoodReputation : state.reputation?.cityReputations?.['istanbul'] || 55;
+          const distProfit = branchHere ? branchHere.todayNetProfit : 0;
 
-          const fillColor = hasBranch
-            ? '#177e5d'
-            : isSelected
-            ? '#9c6b19'
-            : dist.side === 'Anadolu Yakası'
-            ? '#1b354b'
-            : '#162c40';
-
-          const strokeColor = hasBranch
-            ? '#38d39f'
-            : isSelected
-            ? '#f5c76b'
-            : '#3b5c7a';
+          const colors = this.getHeatmapColor(
+            heatmapMode,
+            hasCompany,
+            hasFranchise,
+            isSelected,
+            distRep,
+            distProfit,
+            dist.side === 'Anadolu Yakası' ? '#1b354b' : '#162c40'
+          );
 
           const strokeW = hasBranch || isSelected
             ? this.istanbulZoomCenter ? '1.3' : '2.0'
             : this.istanbulZoomCenter ? '0.6' : '0.9';
 
           const tipLines = [
-            `Yaka: ${dist.side || 'İstanbul'} • ${hasBranch ? '🏪 ŞUBEMİZ AÇIK' : '⚪ Şube Yok'}`,
+            `Yaka: ${dist.side || 'İstanbul'} • ${hasFranchise ? '◆ FRANCHISE BAYİ' : hasCompany ? '★ ÖZ ŞUBEMİZ AÇIK' : '⚪ Şube Yok'}`,
             `👥 Müşteri Potansiyeli: %${dist.customerPotential}`,
-            `💵 Açılış Maliyeti: ${openCost.toLocaleString('tr-TR')} ₺`,
-            `🏢 Günlük Kira: ${rent.toLocaleString('tr-TR')} ₺/gün`,
+            hasBranch
+              ? `💰 Günlük Net Kâr: ${distProfit >= 0 ? '+' : ''}${Math.round(distProfit).toLocaleString('tr-TR')} ₺ (İtibar: ${distRep}★)`
+              : `💵 Açılış Maliyeti: ${openCost.toLocaleString('tr-TR')} ₺ (Kira: ${rent.toLocaleString('tr-TR')} ₺/gün)`,
             `⭐ Gerekli Şehir İtibarı: ${dist.minCityRep} | Görev: Kademe ${dist.requiredQuestTier}`
           ].join('|');
 
@@ -197,14 +250,14 @@ export class MapRenderer {
             <path class="chart-hover-target"
                   style="cursor:pointer;transition:fill 0.15s ease;"
                   d="${geo.d}"
-                  fill="${fillColor}"
-                  stroke="${strokeColor}"
+                  fill="${colors.fill}"
+                  stroke="${colors.stroke}"
                   stroke-width="${strokeW}"
                   stroke-linejoin="round"
                   data-map-district="${dist.id}"
                   data-chart-tip-title="🏘️ ${dist.name} (İstanbul)"
                   data-chart-tip-lines="${this.esc(tipLines)}"
-                  data-chart-tip-color="${hasBranch ? '#38d39f' : '#f5c76b'}" />
+                  data-chart-tip-color="${colors.stroke}" />
           `;
         })
         .join('');
@@ -216,6 +269,7 @@ export class MapRenderer {
           const branchHere = (state.branches || []).find((b) => b.districtId === dist.id);
           const hasBranch = Boolean(branchHere);
           const isSelected = dist.id === selectedDistId;
+          const prefix = branchHere ? (branchHere.isFranchise ? '◆ ' : '★ ') : '';
 
           return `
             <g style="pointer-events:none;">
@@ -225,7 +279,7 @@ export class MapRenderer {
                     font-weight="900"
                     text-anchor="middle"
                     style="text-shadow: 0 1px 3px rgba(0,0,0,0.95);">
-                ${hasBranch ? '★ ' : ''}${dist.name.split('/')[0].trim()}
+                ${prefix}${dist.name.split('/')[0].trim()}
               </text>
             </g>
           `;
@@ -270,7 +324,6 @@ export class MapRenderer {
         ${
           provGeo
             ? `
-          <!-- İlin Gerçek Coğrafi Poligon Silüeti (Merkeze Ölçeklenmiş) -->
           <g transform="translate(390, 200) scale(3.2) translate(-${provGeo.cx}, -${provGeo.cy})">
             <path d="${provGeo.d}" fill="rgba(26, 54, 78, 0.65)" stroke="#38d39f" stroke-width="0.9" stroke-linejoin="round" opacity="0.65" />
           </g>
@@ -278,7 +331,6 @@ export class MapRenderer {
             : ''
         }
 
-        <!-- İlçeler Arası Bağlantı -->
         ${districts
           .map((d, i) => {
             if (i === 0) return '';
@@ -287,27 +339,38 @@ export class MapRenderer {
           })
           .join('')}
 
-        <!-- İlçe Noktaları -->
         ${districts
           .map((dist) => {
             const branchHere = (state.branches || []).find((b) => b.districtId === dist.id);
+            const hasCompany = Boolean(branchHere && !branchHere.isFranchise);
+            const hasFranchise = Boolean(branchHere && branchHere.isFranchise);
             const hasBranch = Boolean(branchHere);
             const isSelected = dist.id === selectedDistId;
             const openCost = Math.round(dist.openingCostBase * inf);
             const rent = Math.round(dist.dailyRentBase * inf);
+            const distRep = branchHere ? branchHere.neighborhoodReputation : state.reputation?.cityReputations?.[provinceId] || 52;
+            const distProfit = branchHere ? branchHere.todayNetProfit : 0;
 
-            const fillColor = hasBranch ? '#177e5d' : isSelected ? '#9c6b19' : '#172b3d';
-            const strokeColor = hasBranch ? '#38d39f' : isSelected ? '#f5c76b' : '#4a6b8a';
+            const colors = this.getHeatmapColor(
+              heatmapMode,
+              hasCompany,
+              hasFranchise,
+              isSelected,
+              distRep,
+              distProfit,
+              '#172b3d'
+            );
 
             const tipLines = [
-              `Durum: ${hasBranch ? '🏪 ŞUBEMİZ AÇIK' : '⚪ Şube Yok (Açılabilir)'}`,
+              `Durum: ${hasFranchise ? '◆ FRANCHISE BAYİ' : hasCompany ? '★ ÖZ ŞUBEMİZ AÇIK' : '⚪ Şube Yok (Açılabilir)'}`,
               `👥 Müşteri Potansiyeli: %${dist.customerPotential}`,
-              `💵 Açılış Maliyeti: ${openCost.toLocaleString('tr-TR')} ₺`,
-              `🏢 Günlük Kira: ${rent.toLocaleString('tr-TR')} ₺/gün`,
+              hasBranch
+                ? `💰 Günlük Net Kâr: ${distProfit >= 0 ? '+' : ''}${Math.round(distProfit).toLocaleString('tr-TR')} ₺`
+                : `💵 Açılış Maliyeti: ${openCost.toLocaleString('tr-TR')} ₺ (Kira: ${rent.toLocaleString('tr-TR')} ₺/gün)`,
               `⭐ Gerekli Şehir İtibarı: ${dist.minCityRep} | Görev: Kademe ${dist.requiredQuestTier}`
             ].join('|');
 
-            const w = 132;
+            const w = 134;
             const h = 46;
 
             return `
@@ -316,18 +379,18 @@ export class MapRenderer {
                  data-map-district="${dist.id}"
                  data-chart-tip-title="🏘️ ${dist.name} (${prov.name})"
                  data-chart-tip-lines="${this.esc(tipLines)}"
-                 data-chart-tip-color="${hasBranch ? '#38d39f' : '#f5c76b'}">
+                 data-chart-tip-color="${colors.stroke}">
                 <rect x="${dist.mapX - w / 2}" y="${dist.mapY - h / 2}"
                       width="${w}" height="${h}" rx="10"
-                      fill="${fillColor}" stroke="${strokeColor}" stroke-width="${hasBranch || isSelected ? '2.5' : '1.4'}" />
+                      fill="${colors.fill}" stroke="${colors.stroke}" stroke-width="${hasBranch || isSelected ? '2.5' : '1.4'}" />
                 <text x="${dist.mapX}" y="${dist.mapY - 4}"
                       fill="#f1f6fa" font-size="10.2" font-weight="900" text-anchor="middle">
                   ${dist.name.split('/')[0].trim()}
                 </text>
                 <text x="${dist.mapX}" y="${dist.mapY + 11}"
                       fill="${hasBranch ? '#a7f3d0' : isSelected ? '#fde68a' : '#a8bed1'}"
-                      font-size="8.8" font-family="JetBrains Mono, monospace" font-weight="800" text-anchor="middle">
-                  ${hasBranch ? `★ ŞUBE (${branchHere?.neighborhoodReputation}★)` : `${(openCost / 1000).toFixed(0)}B ₺ • Pot:%${dist.customerPotential}`}
+                      font-size="8.6" font-family="JetBrains Mono, monospace" font-weight="800" text-anchor="middle">
+                  ${hasFranchise ? `◆ BAYİ (${branchHere?.neighborhoodReputation}★)` : hasCompany ? `★ ŞUBE (${branchHere?.neighborhoodReputation}★)` : `${(openCost / 1000).toFixed(0)}B ₺ • Pot:%${dist.customerPotential}`}
                 </text>
               </g>
             `;

@@ -14,6 +14,9 @@ import { ACHIEVEMENTS, INVESTMENT_CATALOG, LOAN_PACKAGES } from '../data/achieve
 import { ReputationSystem } from './ReputationSystem.js';
 import { QuestSystem } from './QuestSystem.js';
 import { BranchSystem } from './BranchSystem.js';
+import { ManagementSystem } from './ManagementSystem.js';
+import { MANAGEMENT_CONFIG, REGIONAL_CULTURE_MODIFIERS } from '../data/management.js';
+import { TURKEY_PROVINCES } from '../data/turkey_map.js';
 
 export class GameEngine {
 
@@ -163,36 +166,8 @@ export class GameEngine {
       }
     }
 
-    // Bayileşme, 3 Katmanlı İtibar, Görev ve Harita alanlarını eski kayıtlara ekle
-    if (!saved.branches || saved.branches.length === 0) {
-      saved.activeBranchId = 'branch_hq';
-      saved.branches = [BranchSystem.createHeadquartersBranch(saved)];
-    }
-    if (!saved.reputation) {
-      saved.reputation = {
-        neighborhoodReputation: Math.round(saved.shop.reputation || 64),
-        cityReputations: { istanbul: 62, ankara: 50, izmir: 50, bursa: 50 },
-        countryReputation: 54
-      };
-    }
-    if (!saved.quests) {
-      saved.quests = {
-        completedQuestIds: [],
-        currentTier: 1,
-        maxAllowedBranches: 1,
-        lifetimeCustomersServed: 22
-      };
-    }
-    if (!saved.mapView) {
-      const hqProv = saved.branches[0]?.provinceId || 'istanbul';
-      const hqDist = saved.branches[0]?.districtId || 'ist_besiktas';
-      saved.mapView = {
-        level: 'city',
-        selectedProvinceId: hqProv,
-        selectedDistrictId: hqDist
-      };
-    }
-    ReputationSystem.syncReputations(saved);
+    // Bayileşme, 3 Katmanlı İtibar, Görev, Harita ve Zincir Yönetimi alanlarını eski kayıtlara ekle
+    SaveManager.migrateState(saved);
     return saved;
   }
 
@@ -265,6 +240,7 @@ export class GameEngine {
     }
 
     return {
+      saveVersion: MANAGEMENT_CONFIG.saveVersion,
       initialized: false,
       difficulty: 'normal',
       theme: 'dark',
@@ -412,8 +388,10 @@ export class GameEngine {
       mapView: {
         level: 'city',
         selectedProvinceId: 'istanbul',
-        selectedDistrictId: 'ist_besiktas'
-      }
+        selectedDistrictId: 'ist_besiktas',
+        heatmapMode: 'standard'
+      },
+      chainManagement: SaveManager.createDefaultChainManagement('istanbul')
     };
   }
 
@@ -483,8 +461,10 @@ export class GameEngine {
     this.state.mapView = {
       level: 'city',
       selectedProvinceId: hqBranch.provinceId,
-      selectedDistrictId: hqBranch.districtId
+      selectedDistrictId: hqBranch.districtId,
+      heatmapMode: 'standard'
     };
+    this.state.chainManagement = SaveManager.createDefaultChainManagement(hqBranch.provinceId);
     ReputationSystem.syncReputations(this.state);
     SaveManager.saveAuto(this.state);
     this.startLoop();
@@ -564,7 +544,7 @@ export class GameEngine {
 
     const w = hood.customerWeights;
     const totalW = w.ogrenci + w.isci + w.aile + w.turist + w.esnaf;
-    const weightedAppeal = Math.round(
+    const baseAppeal = Math.round(
       (rec.appeal.ogrenci * w.ogrenci +
         rec.appeal.isci * w.isci +
         rec.appeal.aile * w.aile +
@@ -572,6 +552,23 @@ export class GameEngine {
         rec.appeal.esnaf * w.esnaf) /
         Math.max(1, totalW)
     );
+
+    // Faz 4: Bölgesel kültür ve damak tadı etkisi
+    const activeBranch = this.state.branches?.find((b) => b.id === this.state.activeBranchId);
+    const prov = TURKEY_PROVINCES.find((p) => p.id === (activeBranch?.provinceId || 'istanbul'));
+    const region = activeBranch?.regionName || prov?.region || 'Marmara';
+    const culture = REGIONAL_CULTURE_MODIFIERS[region] || REGIONAL_CULTURE_MODIFIERS['Marmara'];
+
+    let regionBonusMult = 1.0;
+    if (rec.id.includes('et') || rec.id.includes('iskender') || rec.id.includes('beyti')) {
+      regionBonusMult = culture.meatPreferenceBonus;
+    } else if (rec.id.includes('tavuk')) {
+      regionBonusMult = culture.chickenPreferenceBonus;
+    } else if (rec.id.includes('kunefe') || rec.id.includes('salgam') || rec.id.includes('sosyete')) {
+      regionBonusMult = culture.spicyAndDessertBonus;
+    }
+
+    const weightedAppeal = Math.min(100, Math.round(baseAppeal * regionBonusMult));
 
     const suggested = this.getSuggestedPrice(recipeId);
     // Mahallenin sosyal çevresine göre müşterinin ödeyebileceği tavan fiyat
@@ -682,6 +679,15 @@ export class GameEngine {
     }
     if (def.category === 'sebze_sos' && this.state.npcs['manav_cevdet']?.hasActiveDeal) {
       discountMult *= 0.80;
+    }
+
+    // Faz 3: Merkez Depo toplu alım indirimi ve tedarik krizi etkisi
+    const wh = this.state.chainManagement?.warehouse;
+    if (wh?.built) {
+      discountMult *= 1 - wh.bulkDiscountPct;
+    }
+    if (wh && wh.supplyCrisisDaysLeft > 0) {
+      discountMult *= 1.14;
     }
 
     return Math.round(def.baseCost * this.state.finance.inflationIndex * tier.costMultiplier * discountMult * 10) / 10;
@@ -1152,6 +1158,8 @@ export class GameEngine {
 
     // Tüm şubelerin kira, vergi, uzak şehir lojistik ve holding yönetim giderlerini hesapla
     BranchSystem.settleAllBranchesEndOfDay(st);
+    // Kademeli yönetim, müdürler, politikalar, karar kutusu ve yönetim raporunu çalıştır
+    ManagementSystem.runDailyManagementCycle(st);
 
     const netProfit =
       st.finance.todayStats.revenue +

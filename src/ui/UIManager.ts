@@ -19,9 +19,14 @@ import { TURKEY_PROVINCES, getDistrictsForProvince } from '../data/turkey_map.ts
 import { ReputationSystem } from '../core/ReputationSystem.ts';
 import { QuestSystem } from '../core/QuestSystem.ts';
 import { BranchSystem } from '../core/BranchSystem.ts';
+import { ManagementSystem } from '../core/ManagementSystem.ts';
 import { MapRenderer } from '../render/MapRenderer.ts';
+import { HqTab } from './tabs/HqTab.ts';
+import { QuestsTab } from './tabs/QuestsTab.ts';
+import { LedgerTab } from './tabs/LedgerTab.ts';
+import { SettingsTab } from './tabs/SettingsTab.ts';
 
-type TabId = 'dukkan' | 'harita' | 'gorevler' | 'sokak' | 'menu' | 'depo' | 'personel' | 'aile' | 'yatirim' | 'defter' | 'ayarlar';
+type TabId = 'dukkan' | 'genel_merkez' | 'harita' | 'gorevler' | 'sokak' | 'menu' | 'depo' | 'personel' | 'aile' | 'yatirim' | 'defter' | 'ayarlar';
 
 interface NavTabItem {
   id: TabId;
@@ -280,9 +285,18 @@ export class UIManager {
     const activeTierQuests = QuestSystem.getAllQuestStatuses(st, this.engine.getNetWorth()).filter(
       (q) => !q.locked && !q.completed
     ).length;
+    const hqAlertCount =
+      (st.chainManagement?.pendingDecisions?.length || 0) +
+      ManagementSystem.getTroubledBranchAlerts(st).length;
 
     const tabs: NavTabItem[] = [
       { id: 'dukkan', icon: '📊', label: 'Dükkan & Operasyon' },
+      {
+        id: 'genel_merkez',
+        icon: '🏢',
+        label: 'Genel Merkez',
+        badge: hqAlertCount > 0 ? `${hqAlertCount} !` : st.chainManagement?.tier?.toUpperCase() || 'USTA'
+      },
       { id: 'harita', icon: '🗺️', label: 'Harita & Şubeler', badge: `${st.branches?.length || 1} Şube` },
       { id: 'gorevler', icon: '🎯', label: 'Görevler & Yetki', badge: activeTierQuests > 0 ? activeTierQuests : '✓' },
       { id: 'sokak', icon: '🤝', label: 'Esnaf & Mahalle' },
@@ -423,6 +437,14 @@ export class UIManager {
     switch (this.activeTab) {
       case 'dukkan':
         this.renderShopTab(content);
+        break;
+      case 'genel_merkez':
+        HqTab.render(content, this.engine, (nextTab: TabId) => {
+          this.activeTab = nextTab;
+          this.updateTopBarLive();
+          this.updateNavHighlight();
+          this.renderActiveTab(false);
+        });
         break;
       case 'harita':
         this.renderMapAndBranchesTab(content);
@@ -600,7 +622,12 @@ export class UIManager {
                   }
                 </div>
               </div>
-              <div style="display:flex;gap:8px;align-items:center;">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <select id="map-heatmap-mode" class="form-select" style="padding:5px 10px;font-size:0.78rem;">
+                  <option value="standard" ${(st.mapView.heatmapMode || 'standard') === 'standard' ? 'selected' : ''}>🗺️ Katman: Standart (★ Şube / ◆ Bayi)</option>
+                  <option value="profit" ${st.mapView.heatmapMode === 'profit' ? 'selected' : ''}>💰 Katman: Kâr / Zarar Isı Haritası</option>
+                  <option value="reputation" ${st.mapView.heatmapMode === 'reputation' ? 'selected' : ''}>⭐ Katman: İtibar Isı Haritası</option>
+                </select>
                 <select id="map-province-select" class="form-select" style="padding:5px 10px;font-size:0.78rem;">
                   ${TURKEY_PROVINCES.map(
                     (p) =>
@@ -622,9 +649,10 @@ export class UIManager {
             <!-- Harita Renk Skalası Açıklaması -->
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;font-size:0.77rem;font-weight:700;color:var(--text-secondary);">
               <div style="display:flex;gap:14px;flex-wrap:wrap;">
-                <span><strong style="color:#38d39f;">▉ Yeşil Vurgulu:</strong> Şubemiz Açık</span>
+                <span><strong style="color:#38d39f;">▉ ★ Yeşil:</strong> Öz Şubemiz Açık</span>
+                <span><strong style="color:#f6ad55;">▉ ◆ Turuncu:</strong> Franchise Bayi</span>
                 <span><strong style="color:#f5c76b;">▉ Altın Çerçeveli:</strong> Seçili Lokasyon</span>
-                <span><strong style="color:#6c869e;">▉ Nötr Arduvaz:</strong> Şube Yok (İtibara Göre Yoğunluk)</span>
+                <span><strong style="color:#6c869e;">▉ Arduvaz:</strong> Şube Yok</span>
               </div>
               ${
                 st.mapView.level === 'turkey'
@@ -720,20 +748,29 @@ export class UIManager {
               existingBranchInDist
                 ? `
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;">
-                <button class="btn btn-primary" style="flex:1;" data-switch-branch="${existingBranchInDist.id}">
-                  🎛️ Bu Şubeyi Yönet (${existingBranchInDist.districtName})
-                </button>
+                ${
+                  existingBranchInDist.isFranchise
+                    ? `<button class="btn btn-outline" style="flex:1;" data-audit-branch="${existingBranchInDist.id}">🔍 Bayiyi Denetle (${existingBranchInDist.districtName})</button>`
+                    : `<button class="btn btn-primary" style="flex:1;" data-switch-branch="${existingBranchInDist.id}">🎛️ Bu Şubeyi Yönet (${existingBranchInDist.districtName})</button>`
+                }
                 ${
                   !existingBranchInDist.isHeadquarters
-                    ? `<button class="btn btn-danger btn-sm" data-close-branch="${existingBranchInDist.id}">🛑 Şubeyi Kapat / Sat</button>`
+                    ? `<button class="btn btn-danger btn-sm" data-close-branch="${existingBranchInDist.id}">🛑 ${existingBranchInDist.isFranchise ? 'Sözleşmeyi Feshet' : 'Şubeyi Kapat / Sat'}</button>`
                     : ''
                 }
               </div>
             `
                 : `
-              <div style="display:flex;gap:8px;margin-top:auto;">
+              <div style="display:flex;flex-direction:column;gap:8px;margin-top:auto;">
                 <button class="btn btn-primary btn-block" id="btn-open-branch-here" ${!evalInfo.canOpen ? 'disabled' : ''}>
-                  ${evalInfo.canOpen ? `🏪 ${selectedProv.name} / ${selectedDist.name} Şubesini Aç (${evalInfo.openingCost.toLocaleString('tr-TR')} ₺)` : `🔒 ${evalInfo.reasons[0] || 'Koşullar Eksik'}`}
+                  ${evalInfo.canOpen ? `★ ${selectedProv.name} / ${selectedDist.name} Öz Şube Aç (-${evalInfo.openingCost.toLocaleString('tr-TR')} ₺ • Başlangıç İtibar: ${evalInfo.estimatedInitialRep}★)` : `🔒 ${evalInfo.reasons[0] || 'Koşullar Eksik'}`}
+                </button>
+                <button class="btn btn-outline btn-block" id="btn-grant-franchise-here" ${!evalInfo.canGrantFranchise ? 'disabled' : ''} style="border-color:#f6ad55;color:#f6ad55;">
+                  ${
+                    evalInfo.canGrantFranchise
+                      ? `◆ Bayilik (Franchise) Ver (+${evalInfo.franchiseUpfrontFee.toLocaleString('tr-TR')} ₺ Peşin İsim Hakkı + %${evalInfo.franchiseRoyaltyPct} Günlük Ciro Payı • Sıfır Kira/Maaş)`
+                      : `🔒 Bayilik Vermek İçin: En Az 3 Şube, Kontenjan ve 58+ Ülke İtibarı Gerekir`
+                  }
                 </button>
               </div>
             `
@@ -858,6 +895,12 @@ export class UIManager {
       this.renderActiveTab(false);
     });
 
+    // Harita ısı katmanı seçimi
+    container.querySelector('#map-heatmap-mode')?.addEventListener('change', (e) => {
+      st.mapView.heatmapMode = (e.target as HTMLSelectElement).value as any;
+      this.renderActiveTab(true);
+    });
+
     // İl seçimi (Select kutusu veya Türkiye SVG Haritası üzerindeki 81 il kutuları)
     container.querySelector('#map-province-select')?.addEventListener('change', (e) => {
       const provId = (e.target as HTMLSelectElement).value;
@@ -904,9 +947,33 @@ export class UIManager {
       if (!res.ok) {
         this.showToast('Şube Açılamadı', res.msg, 'warning');
       } else {
+        ManagementSystem.checkAndAdvanceManagementTier(st);
         QuestSystem.evaluateQuests(st, this.engine.getNetWorth());
         this.renderMainShell();
       }
+    });
+
+    // Faz 5: Bayilik (Franchise) verme butonu
+    container.querySelector('#btn-grant-franchise-here')?.addEventListener('click', () => {
+      const res = BranchSystem.grantFranchiseBranch(st, selectedProv.id, selectedDist.id);
+      if (!res.ok) {
+        this.showToast('Bayilik Verilemedi', res.msg, 'warning');
+      } else {
+        ManagementSystem.checkAndAdvanceManagementTier(st);
+        QuestSystem.evaluateQuests(st, this.engine.getNetWorth());
+        this.renderMainShell();
+      }
+    });
+
+    // Bayi veya şube teftişi
+    container.querySelectorAll('[data-audit-branch]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const bId = (btn as HTMLElement).getAttribute('data-audit-branch');
+        if (bId) {
+          ManagementSystem.auditManagerOrBranch(st, bId);
+          this.renderActiveTab(true);
+        }
+      });
     });
 
     // Şube yönetimine geçiş
@@ -938,86 +1005,7 @@ export class UIManager {
   // ==========================================================================
 
   private renderQuestsTab(container: HTMLElement): void {
-    const st = this.engine.state;
-    const netWorth = this.engine.getNetWorth();
-    QuestSystem.evaluateQuests(st, netWorth);
-    const allStatuses = QuestSystem.getAllQuestStatuses(st, netWorth);
-
-    const completedCount = allStatuses.filter((q) => q.completed).length;
-    const tiers = [1, 2, 3, 4, 5];
-
-    container.innerHTML = `
-      <div class="panel-scroll">
-        <div class="section-title">
-          <div>
-            <h2>🎯 Bayileşme Görevleri & Şube Açma Yetki Kademeleri</h2>
-            <p style="font-size:0.84rem;color:var(--text-secondary);font-weight:600;">
-              Yeni şube açabilmek için iki koşul birlikte aranır: <strong>(1) İlgili kademedeki görevlerin tamamlanması</strong> ve <strong>(2) Yeterli nakit sermaye</strong>.
-            </p>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <span class="badge badge-info">Tamamlanan Görev: ${completedCount} / ${allStatuses.length}</span>
-            <span class="badge badge-success">Açık Şube Yetkisi: Maks. ${st.quests.maxAllowedBranches === 99 ? 'Sınırsız' : st.quests.maxAllowedBranches} Şube</span>
-          </div>
-        </div>
-
-        <!-- KADEMELER BAZINDA GÖREV LİSTESİ -->
-        ${tiers
-          .map((tierNum) => {
-            const tierQuests = allStatuses.filter((q) => q.def.tier === tierNum);
-            if (tierQuests.length === 0) return '';
-            const tierTitle = tierQuests[0].def.tierTitle;
-            const doneInTier = tierQuests.filter((q) => q.completed).length;
-            const isTierUnlocked = tierNum <= st.quests.currentTier;
-            const isTierAllDone = doneInTier === tierQuests.length;
-
-            return `
-              <div class="game-card" style="margin-bottom:16px;${isTierAllDone ? 'border-color:var(--emerald);' : isTierUnlocked ? 'border-color:var(--accent-secondary);' : 'opacity:0.68;'}">
-                <div class="card-head">
-                  <div>
-                    <span class="card-kicker">${isTierAllDone ? '✓ KADEME TAMAMLANDI' : isTierUnlocked ? '🔥 AKTİF GÖREV KADEMESİ' : '🔒 KİLİTLİ KADEME'}</span>
-                    <div class="card-title">${tierTitle}</div>
-                  </div>
-                  <span class="badge ${isTierAllDone ? 'badge-success' : isTierUnlocked ? 'badge-warning' : 'badge-neutral'}">
-                    ${doneInTier} / ${tierQuests.length} Görev Tamamlandı
-                  </span>
-                </div>
-
-                <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(290px,1fr));">
-                  ${tierQuests
-                    .map((qs) => {
-                      const scaledReward = Math.round(qs.def.rewardCash * st.finance.inflationIndex);
-                      return `
-                        <div style="background:var(--bg-row);border:1px solid ${
-                          qs.completed ? 'rgba(56,211,159,0.45)' : 'var(--border-color)'
-                        };border-radius:10px;padding:13px;display:flex;flex-direction:column;gap:8px;">
-                          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                            <div style="font-weight:800;font-size:0.93rem;">${qs.def.icon} ${qs.def.title}</div>
-                            <span class="badge ${qs.completed ? 'badge-success' : qs.locked ? 'badge-neutral' : 'badge-info'}">
-                              ${qs.completed ? '✓ Tamam' : qs.locked ? '🔒 Kilitli' : `%${qs.progressPct}`}
-                            </span>
-                          </div>
-                          <div style="font-size:0.79rem;color:var(--text-secondary);">${qs.def.description}</div>
-
-                          <div class="progress-bar">
-                            <div class="progress-fill ${qs.completed ? 'good' : 'warn'}" style="width:${qs.progressPct}%"></div>
-                          </div>
-
-                          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.76rem;font-family:'JetBrains Mono',monospace;">
-                            <span>İlerleme: <strong>${qs.currentValue.toLocaleString('tr-TR')} / ${qs.targetValue.toLocaleString('tr-TR')}</strong></span>
-                            <span style="color:var(--emerald);font-weight:800;">+${scaledReward.toLocaleString('tr-TR')} ₺ & +${qs.def.rewardBrandRep}★</span>
-                          </div>
-                        </div>
-                      `;
-                    })
-                    .join('')}
-                </div>
-              </div>
-            `;
-          })
-          .join('')}
-      </div>
-    `;
+    QuestsTab.render(container, this.engine);
   }
 
   // ==========================================================================
@@ -3040,209 +3028,21 @@ export class UIManager {
   // ==========================================================================
 
   private renderLedgerTab(container: HTMLElement): void {
-    const st = this.engine.state;
-    const totalIngCost = st.finance.ledgerHistory.reduce((s, d) => s + d.ingredientCost, 0);
-    const totalOpCost = st.finance.ledgerHistory.reduce((s, d) => s + d.operatingCost, 0);
-    const totalFamCost = st.finance.ledgerHistory.reduce((s, d) => s + d.familyCost, 0);
-
-    container.innerHTML = `
-      <div class="panel-scroll">
-        <div class="section-title">
-          <h2>📈 Esnaf Muhasebe Defteri, Çoklu Analiz Grafikleri & Müşteri Yorumları</h2>
-        </div>
-
-        <div class="game-card" style="margin-bottom:18px;">
-          <div class="card-head">
-            <div>
-              <span class="card-kicker">MALİYET YAPISI ANALİZİ</span>
-              <div class="card-title">📊 Toplam Gider Kalemleri Dağılımı (Malzeme vs İşletme vs Aile)</div>
-            </div>
-          </div>
-          ${ChartRenderer.renderSegmentedBar([
-            { label: 'Et, Lavaş & Malzeme Tedariki', subLabel: `${totalIngCost.toLocaleString('tr-TR')} ₺`, value: Math.max(1, totalIngCost), color: '#f68773' },
-            { label: 'Dükkan Kira, Maaş & Bakım', subLabel: `${totalOpCost.toLocaleString('tr-TR')} ₺`, value: Math.max(1, totalOpCost), color: '#f5c76b' },
-            { label: 'Aile & Ev Geçim Masrafları', subLabel: `${totalFamCost.toLocaleString('tr-TR')} ₺`, value: Math.max(1, totalFamCost), color: '#63b3ed' }
-          ])}
-        </div>
-
-        <div class="dashboard-2col">
-          <div class="game-card">
-            <div class="card-head">
-              <div>
-                <span class="card-kicker">GELİR & GİDER EĞRİSİ</span>
-                <div class="card-title">📈 Günlük Ciro, Gider ve Net Kâr Çizgi Grafiği</div>
-              </div>
-            </div>
-            ${ChartRenderer.renderProfitLineChart(st.finance.ledgerHistory)}
-          </div>
-
-          <div class="game-card">
-            <div class="card-head">
-              <div>
-                <span class="card-kicker">MAKRO EKONOMİ & TRAFİK</span>
-                <div class="card-title">📊 Müşteri Sayısı Sütunları & Enflasyon Endeksi Trendi</div>
-              </div>
-            </div>
-            ${ChartRenderer.renderInflationTrendChart(st.finance.ledgerHistory)}
-          </div>
-        </div>
-
-        <div class="dashboard-2col">
-          <div class="game-card">
-            <div class="card-title">💬 "MahalleYorum & DönerSepeti" Müşteri Yorumları</div>
-            <div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;">
-              ${st.reviews
-                .map(
-                  (r) => `
-                <div style="padding:10px 12px;background:var(--bg-row);border:1px solid var(--border-color);border-radius:8px;font-size:0.82rem;">
-                  <div style="display:flex;justify-content:space-between;font-weight:800;margin-bottom:3px;">
-                    <span>@${r.author} (${r.customerType.toUpperCase()}) • Gün ${r.day}</span>
-                    <span style="color:#f5c76b;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
-                  </div>
-                  <div style="color:var(--text-secondary);">"${r.comment}"</div>
-                </div>
-              `
-                )
-                .join('')}
-            </div>
-          </div>
-
-          <div class="game-card">
-            <div class="card-title">🏆 Esnaf Başarımları & Rozetler (${st.unlockedAchievements.length}/${ACHIEVEMENTS.length})</div>
-            <div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;">
-              ${ACHIEVEMENTS.map((ach) => {
-                const unlocked = st.unlockedAchievements.includes(ach.id);
-                return `
-                  <div style="padding:10px 12px;background:var(--bg-row);border:1px solid var(--border-color);border-radius:8px;display:flex;justify-content:space-between;align-items:center;opacity:${unlocked ? '1' : '0.55'};">
-                    <div>
-                      <div style="font-weight:800;font-size:0.86rem;">${ach.icon} ${ach.title}</div>
-                      <div style="font-size:0.76rem;color:var(--text-secondary);">${ach.description}</div>
-                    </div>
-                    <span class="badge ${unlocked ? 'badge-success' : 'badge-neutral'}">
-                      ${unlocked ? '✓ Kazanıldı' : `+${ach.rewardCash} ₺`}
-                    </span>
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        </div>
-
-        <div class="game-card">
-          <div class="card-title">📜 Nesiller Boyu Dükkan & Aile Hikayesi (Hayat Özeti)</div>
-          <div style="display:flex;flex-direction:column;gap:6px;">
-            ${st.storyLog
-              .slice()
-              .reverse()
-              .map(
-                (log) => `
-              <div style="padding:9px 12px;background:var(--bg-row);border-left:3px solid var(--accent-secondary);border-radius:6px;font-size:0.83rem;">
-                <strong>[Gün ${log.day}] ${log.title}:</strong> ${log.text}
-              </div>
-            `
-              )
-              .join('')}
-          </div>
-        </div>
-      </div>
-    `;
+    LedgerTab.render(container, this.engine);
   }
 
-  // ==========================================================================
-  // 9. KAYIT SLOTLARI VE AYARLAR SEKMESİ
-  // ==========================================================================
-
   private renderSettingsTab(container: HTMLElement): void {
-    const slots = SaveManager.getSlotsMeta();
-
-    container.innerHTML = `
-      <div class="panel-scroll">
-        <div class="section-title">
-          <h2>⚙️ Kayıt Slotları, Tema ve Yeni Oyun</h2>
-        </div>
-
-        <div class="card-grid" style="margin-bottom:18px;">
-          ${slots
-            .map(
-              (s) => `
-            <div class="game-card">
-              <div class="card-head">
-                <div class="card-title">💾 ${s.label}</div>
-                <span class="badge ${s.exists ? 'badge-success' : 'badge-neutral'}">${s.exists ? 'Dolu' : 'Boş'}</span>
-              </div>
-              ${
-                s.exists
-                  ? `<div style="font-size:0.82rem;color:var(--text-secondary);">
-                      <strong>${s.shopName}</strong> (${s.playerName})<br/>
-                      Yıl ${s.year} • Gün ${s.day} • Kasa: ${Math.round(s.cash || 0).toLocaleString('tr-TR')} ₺<br/>
-                      <span style="font-size:0.74rem;color:var(--text-muted);">Kayıt: ${s.savedAt}</span>
-                    </div>`
-                  : `<div style="font-size:0.82rem;color:var(--text-muted);">Bu slota henüz kayıt yapılmadı.</div>`
-              }
-              <div style="display:flex;gap:6px;margin-top:auto;">
-                <button class="btn btn-primary btn-sm" data-save-slot="${s.slotId}">💾 Kaydet</button>
-                <button class="btn btn-sm" data-load-slot="${s.slotId}" ${!s.exists ? 'disabled' : ''}>📂 Yükle</button>
-                <button class="btn btn-danger btn-sm" data-del-slot="${s.slotId}" ${!s.exists ? 'disabled' : ''}>🗑️</button>
-              </div>
-            </div>
-          `
-            )
-            .join('')}
-        </div>
-
-        <div class="game-card">
-          <div class="card-title">🔄 Yeni Oyun Başlat</div>
-          <div style="font-size:0.84rem;color:var(--text-secondary);">
-            Farklı bir şehir, aile durumu veya başlangıç senaryosu ile sıfırdan yeni bir döner dükkanı kurmak isterseniz aşağıdaki butonu kullanabilirsiniz.
-          </div>
-          <div>
-            <button class="btn btn-danger" id="btn-new-game-modal">🔥 Yeni Karakter & Dükkan Kurulum Ekranını Aç</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    container.querySelectorAll('[data-save-slot]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const slotId = (btn as HTMLElement).getAttribute('data-save-slot');
-        if (slotId && SaveManager.saveSlot(slotId, this.engine.state)) {
-          this.showToast('Oyun Kaydedildi 💾', `${slotId.toUpperCase()} üzerine başarıyla kaydedildi.`, 'success');
-          this.renderActiveTab(true);
-        }
-      });
-    });
-
-    container.querySelectorAll('[data-load-slot]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const slotId = (btn as HTMLElement).getAttribute('data-load-slot');
-        if (!slotId) return;
-        const loaded = SaveManager.loadSlot(slotId);
-        if (loaded) {
-          this.engine.state = loaded;
-          this.engine.recalculateShopStats();
-          this.showToast('Kayıt Yüklendi 📂', `${loaded.shop.name} yüklendi.`, 'info');
-          this.renderMainShell();
-        }
-      });
-    });
-
-    container.querySelectorAll('[data-del-slot]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const slotId = (btn as HTMLElement).getAttribute('data-del-slot');
-        if (slotId) {
-          SaveManager.deleteSlot(slotId);
-          this.renderActiveTab(true);
-        }
-      });
-    });
-
-    container.querySelector('#btn-new-game-modal')?.addEventListener('click', () => {
-      this.engine.setSpeed(0);
-      SetupModal.render(this.root, this.engine, () => {
+    SettingsTab.render(
+      container,
+      this.root,
+      this.engine,
+      () => this.renderActiveTab(true),
+      () => {
         this.activeTab = 'dukkan';
         this.renderMainShell();
-      });
-    });
+      },
+      (title: any, text: any, type: any) => this.showToast(title, text, type)
+    );
   }
 
   public showToast(title: string, text: string, type: 'info' | 'success' | 'warning' | 'danger' = 'info'): void {

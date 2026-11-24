@@ -3,7 +3,7 @@
 // İmleç (Hover) ile Nokta, Sütun ve Dilim Detayı Gösteren SVG & Veri Grafikleri
 // ============================================================================
 
-import type { DailyLedgerEntry, HourlyPoint } from '../types/index.ts';
+import type { DailyLedgerEntry, HourlyPoint, BranchState } from '../types/index.ts';
 
 export interface SegmentSlice {
   label: string;
@@ -523,6 +523,62 @@ export class ChartRenderer {
               `;
             })
             .join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Faz 2: Şube ve Bölge Bazlı Ciro / Gider / Net Kâr Karşılaştırma Grafiği (Hover Detaylı)
+   */
+  public static renderBranchComparisonChart(branches: BranchState[]): string {
+    const list = branches || [];
+    if (list.length === 0) {
+      return `<div style="padding:16px;text-align:center;color:var(--text-muted);">Şube verisi bulunmuyor.</div>`;
+    }
+
+    const maxRev = Math.max(2500, ...list.map((b) => Math.max(b.todayRevenue, Math.abs(b.todayNetProfit))));
+
+    return `
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${list
+          .map((b) => {
+            const totalExp = b.todayIngredientCost + b.todayRentAndTax + b.todayLogisticsCost + b.todayStaffCost;
+            const revPct = Math.min(100, Math.round((b.todayRevenue / maxRev) * 100));
+            const expPct = Math.min(100, Math.round((totalExp / maxRev) * 100));
+            const tipLines = [
+              `Tür: ${b.isFranchise ? '◆ Bayi (Franchise)' : b.isHeadquarters ? '★ Merkez Şube' : '★ Öz Şube'} (${b.regionName || 'Marmara'})`,
+              `🟢 Günlük Ciro: ${Math.round(b.todayRevenue).toLocaleString('tr-TR')} ₺`,
+              `🔴 Toplam Gider: ${b.isFranchise ? '0 ₺ (Bayi Öder)' : `${Math.round(totalExp).toLocaleString('tr-TR')} ₺`}`,
+              `💰 Net Kâr: ${b.todayNetProfit >= 0 ? '+' : ''}${Math.round(b.todayNetProfit).toLocaleString('tr-TR')} ₺`,
+              `⭐ Mahalle İtibarı: ${b.neighborhoodReputation} • Hijyen: %${Math.round(b.hygiene)}`
+            ].join('|');
+
+            return `
+              <div class="menu-margin-row chart-hover-target"
+                   data-chart-tip-title="${this.esc(`${b.isFranchise ? '◆' : '★'} ${b.provinceName} - ${b.districtName}`)}"
+                   data-chart-tip-lines="${this.esc(tipLines)}"
+                   data-chart-tip-color="${b.todayNetProfit >= 0 ? '#38d39f' : '#fc8181'}">
+                <div style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  ${b.isFranchise ? '◆' : '★'} ${b.provinceName} • ${b.districtName}
+                </div>
+                <div style="height:16px;background:var(--bg-input);border-radius:6px;overflow:hidden;display:flex;border:1px solid var(--border-color);position:relative;">
+                  <div style="width:${revPct}%;background:#38d39f;opacity:0.85;" title="Ciro"></div>
+                  <div style="position:absolute;left:0;top:0;bottom:0;width:${expPct}%;background:rgba(252,129,129,0.65);" title="Gider"></div>
+                </div>
+                <div style="font-family:'JetBrains Mono',monospace;font-weight:800;text-align:right;color:${b.todayNetProfit >= 0 ? '#38d39f' : '#fc8181'};">
+                  ${b.todayNetProfit >= 0 ? '+' : ''}${Math.round(b.todayNetProfit).toLocaleString('tr-TR')}₺
+                </div>
+              </div>
+            `;
+          })
+          .join('')}
+        <div style="display:flex;justify-content:space-between;font-size:0.74rem;color:var(--text-muted);font-weight:700;margin-top:4px;">
+          <div style="display:flex;gap:14px;">
+            <span><strong style="color:#38d39f;">▉</strong> Şube Günlük Cirosu</span>
+            <span><strong style="color:#fc8181;">▉</strong> Şube Toplam Gideri</span>
+          </div>
+          <span>★ Öz Şube | ◆ Franchise Bayi</span>
         </div>
       </div>
     `;

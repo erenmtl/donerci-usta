@@ -74,11 +74,24 @@ export class ReputationSystem {
   }
 
   /**
-   * Bir şubede hijyen kritik seviyenin (%35) altına düşerse skandal patlak verir ve tüm marka etkilenir.
+   * Faz 6: Bir şubede hijyen kritik seviyenin (%38) altına düşerse skandal patlak verir ve tüm marka etkilenir.
+   * Müdür yeteneği ve hijyen politikası standardı skandal olasılığını doğrudan düşürür veya artırır.
    */
-  public static checkBranchScandal(state: GameState, branchName: string, provinceId: string, hygiene: number): void {
-    if (hygiene >= 35) return;
-    if (Math.random() > 0.25) return; // Gün içinde belirli olasılıkla patlak verir
+  public static checkBranchScandal(
+    state: GameState,
+    branchName: string,
+    provinceId: string,
+    hygiene: number,
+    managerSkill = 0,
+    hygieneStandard = 'normal'
+  ): void {
+    const threshold = hygieneStandard === 'yuksek' ? 32 : hygieneStandard === 'dusuk' ? 42 : 36;
+    if (hygiene >= threshold) return;
+
+    const mgrProtection = (managerSkill / 100) * 0.16;
+    const stdModifier = hygieneStandard === 'yuksek' ? -0.08 : hygieneStandard === 'dusuk' ? 0.12 : 0;
+    const scandalProb = Math.max(0.04, 0.25 - mgrProtection + stdModifier);
+    if (Math.random() > scandalProb) return;
 
     state.shop.reputation = Math.max(10, state.shop.reputation - 10);
     const currentCityRep = state.reputation.cityReputations[provinceId] || 55;

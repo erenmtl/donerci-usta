@@ -74,11 +74,24 @@ def strip_typescript(ts_code: str) -> str:
     code = re.sub(r'\s+as\s+Gender\b', '', code)
     code = re.sub(r'\s+as\s+FamilyStatus\b', '', code)
     code = re.sub(r'\s+as\s+DifficultyLevel\b', '', code)
+    code = re.sub(r'\s+as\s+GameState\b', '', code)
+    code = re.sub(r'\s+as\s+PricePolicyMode\b', '', code)
+    code = re.sub(r'\s+as\s+HygieneStandardMode\b', '', code)
+    code = re.sub(r'\s+as\s+SupplierTierMode\b', '', code)
+    code = re.sub(r'\s+as\s+MapHeatmapMode\b', '', code)
+    code = re.sub(r'\s+as\s+ManagerLevel\b', '', code)
+    code = re.sub(r'\s+as\s+TurkeyRegion\b', '', code)
     code = re.sub(r'\s+as\s+0\s*\|\s*1\s*\|\s*2\s*\|\s*4', '', code)
     code = re.sub(r'\s+as\s+\[string,\s*\'ucuz\'\s*\|\s*\'standart\'\s*\|\s*\'kaliteli\'\]', '', code)
 
     # 7. Fonksiyon dönüş tiplerini `): ReturnType {` veya `): void =>` temizle
-    code = re.sub(r'\)\s*:\s*(?:void|boolean|number|string|GridCoord\s*\|\s*null|GameState\s*\|\s*null|GameState|SaveSlotMeta\[\]|CustomerType| {[^}]+}|\[[^\]]+\]|Record<[^>]+>|\(\)\s*=>\s*void)\s*(\{|=>)', r') \1', code)
+    code = re.sub(
+        r'\)\s*:\s*(?:void|boolean|number|string|GridCoord\s*\|\s*null|GameState\s*\|\s*null|GameState|'
+        r'SaveSlotMeta\[\]|CustomerType|BranchState|ChainManagementState|ManagerState\[\]|ManagerState|'
+        r'PolicyConfig|ManagementTier|BranchAlertItem\[\]|GameState\[\'shop\'\]|\{[^}]+\}|\[[^\]]+\]|Record<[^>]+>|\(\)\s*=>\s*void)\s*(\{|=>)',
+        r') \1',
+        code
+    )
 
     # 8. Değişken ve özellik tip anotasyonlarını (`const x: Type =`, `prop: Type =`) temizle
     code = re.sub(
@@ -110,6 +123,7 @@ def strip_typescript(ts_code: str) -> str:
     code = re.sub(r'onCellClick\?:\s*\(gx:\s*number,\s*gy:\s*number\)\s*=>\s*void', 'onCellClick', code)
     code = re.sub(r'onSelectNpc\?:\s*\(npcId:\s*string\)\s*=>\s*void', 'onSelectNpc', code)
     code = re.sub(r'onComplete:\s*\(\)\s*=>\s*void', 'onComplete', code)
+    code = re.sub(r'onSwitchTab:\s*\(tab:\s*any\)\s*=>\s*void', 'onSwitchTab', code)
     code = re.sub(r'tierOverride\?:\s*\'ucuz\'\s*\|\s*\'standart\'\s*\|\s*\'kaliteli\'', 'tierOverride', code)
     code = re.sub(r'tier:\s*\'ucuz\'\s*\|\s*\'standart\'\s*\|\s*\'kaliteli\'', 'tier', code)
     code = re.sub(r'type:\s*\'info\'\s*\|\s*\'success\'\s*\|\s*\'warning\'\s*\|\s*\'danger\'\s*=\s*\'info\'', "type = 'info'", code)
@@ -119,7 +133,8 @@ def strip_typescript(ts_code: str) -> str:
     simple_types = (
         r'(?:string|number|boolean|any|GameState|GameEngine|HTMLElement|HTMLCanvasElement|'
         r'CanvasRenderingContext2D|MouseEvent|CustomerType|DailyLedgerEntry\[\]|DailyLedgerEntry|'
-        r'GameEventDef|Listener)'
+        r'GameEventDef|Listener|DistrictDef|BranchState\[\]|BranchState|ManagerState|PolicyConfig|PendingDecision|'
+        r'TurkeyRegion|PricePolicyMode|HygieneStandardMode|SupplierTierMode|MapHeatmapMode|ManagerLevel|TabId)'
     )
     code = re.sub(rf'(\b[A-Za-z0-9_]+)\?\s*:\s*{simple_types}', r'\1', code)
     code = re.sub(rf'(\b[A-Za-z0-9_]+)\s*:\s*{simple_types}', r'\1', code)

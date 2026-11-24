@@ -3,9 +3,11 @@
 // Tüm denge sabitleri EXPANSION_CONFIG içinden kolayca ayarlanabilir.
 // ============================================================================
 
+import { MANAGEMENT_CONFIG } from './management.ts';
+
 export const EXPANSION_CONFIG = {
   // Şube sayısı arttıkça şube başına eklenen günlük yönetim/holding genel gideri (TL)
-  holdingOverheadPerBranch: 420,
+  holdingOverheadPerBranch: MANAGEMENT_CONFIG.holdingOverheadPerExtraBranchBase,
   // Her ek şubenin yönetim zorluğu çarpanı (gider artışı)
   branchComplexityMultiplier: 0.12,
   // Satış üzerinden alınan yerel belediye & gelir vergisi oranı
@@ -21,7 +23,11 @@ export const EXPANSION_CONFIG = {
   branchCloseBrandRepPenalty: -4,
   // Bir şubede hijyen %35 altına düştüğünde patlak veren skandalın ülke markasına cezası
   scandalBrandRepPenalty: -8,
-  scandalCityRepPenalty: -12
+  scandalCityRepPenalty: -12,
+  // Faz 0 & Faz 1 ek sabitler
+  baseChefMonthlySalary: MANAGEMENT_CONFIG.baseChefMonthlySalary,
+  hqOpeningCostBase: MANAGEMENT_CONFIG.hqOpeningCostBase,
+  hqInitialCumulativeProfitBase: MANAGEMENT_CONFIG.hqInitialCumulativeProfitBase
 };
 
 export interface QuestDef {

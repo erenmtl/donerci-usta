@@ -352,6 +352,121 @@ export const RANDOM_EVENTS: GameEventDef[] = [
         }
       }
     ]
+  },
+
+  // FAZ 6: ZİNCİR, ŞUBE VE MARKA KRİZ OLAY KARTLARI
+  {
+    id: 'zincir_bakanlik_teftisi',
+    category: 'hijyen',
+    title: 'Tarım ve Gıda Bakanlığı Zincir Genelinde Eşzamanlı Denetim Başlattı!',
+    icon: '🔬',
+    description: 'Bakanlık müfettişleri şubelerinizden et, sos ve kızartma yağı numuneleri alıyor. Tüm Türkiye basını denetim sonuçlarını bekliyor!',
+    choices: [
+      {
+        label: 'Bağımsız Gıda Laboratuvarı Tut ve Tüm Şubeleri Dezenfekte Et (-3.200 ₺)',
+        outcomeText: 'Numuneler %100 dana ve taze tavuk çıktı! Ulusal basında "Örnek Döner Zinciri" olarak haber oldunuz.',
+        effects: {
+          cashDelta: -3200,
+          hygieneDelta: 22,
+          reputationDelta: 9,
+          trafficMultiplierDelta: 0.30
+        }
+      },
+      {
+        label: 'Şube Müdürlerine Güven ve Rutin Belgeleri Sun',
+        outcomeText: 'Denetim sorunsuz geçti, müşterilerin markaya güveni tazelendi.',
+        effects: {
+          hygieneDelta: 6,
+          reputationDelta: 3
+        }
+      }
+    ]
+  },
+  {
+    id: 'zincir_kurye_personel_grevi',
+    category: 'esnaf',
+    title: 'Şube Ustaları ve Paket Kuryeleri Prim & Maaş İyileştirmesi İstiyor!',
+    icon: '✊',
+    description: 'Artan hayat pahalılığı sonrası şubelerdeki ustalar ve kuryeler öğle servisi öncesi iş yavaşlatma eylemi yaptı.',
+    choices: [
+      {
+        label: 'Tüm Kadroya Bayram İkramiyesi ve Sıcak Yemek Primi Dağıt (-2.800 ₺)',
+        outcomeText: 'Personel alkışlarla ocağın başına döndü! Servis hızı ve güler yüz müşterileri mest etti.',
+        effects: {
+          cashDelta: -2800,
+          reputationDelta: 6,
+          trafficMultiplierDelta: 0.22
+        }
+      },
+      {
+        label: 'Sadece Performansı Yüksek Ustalara Zam Sözü Ver (-1.100 ₺)',
+        outcomeText: 'Eylem sona erdi, servis normal seyrine döndü.',
+        effects: {
+          cashDelta: -1100,
+          reputationDelta: 1
+        }
+      },
+      {
+        label: 'Talebi Reddet ("Beğenmeyen Önlüğü Bıraksın")',
+        outcomeText: 'Bazı kuryeler işi bıraktı, siparişler gecikti ve müşteri şikayetleri arttı.',
+        effects: {
+          reputationDelta: -7,
+          trafficMultiplierDelta: -0.28
+        }
+      }
+    ]
+  },
+  {
+    id: 'zincir_avm_kira_artisi',
+    category: 'ekonomi',
+    title: 'Dükkan Mülk Sahiplerinden Ek Kira ve Hava Parası Baskısı!',
+    icon: '🏢',
+    description: 'Merkezi caddedeki mülk sahipleri dönercinin önündeki kuyruğu görünce kira kontratını yenilemek için ek ödeme talep etti.',
+    choices: [
+      {
+        label: 'Emlakçı Murat ve Avukatla Masaya Oturup Peşin Uzlaş (-2.400 ₺)',
+        outcomeText: 'Kontrat 5 yıl uzatıldı, tabela ve vitrin yenilendi.',
+        effects: {
+          cashDelta: -2400,
+          reputationDelta: 4
+        }
+      },
+      {
+        label: 'Mahalle Esnaf Odasını Devreye Sok (-12 Enerji)',
+        outcomeText: 'Esnaf odası araya girdi, makul bir artışla tatlıya bağlandı.',
+        effects: {
+          energyDelta: -12,
+          cashDelta: -950
+        }
+      }
+    ]
+  },
+  {
+    id: 'zincir_ulusal_gurme_haberi',
+    category: 'musteri_akisi',
+    title: 'Ünlü Gastronomi Kanalı ve Gazete Gurmesi Şubene Geldi!',
+    icon: '📺',
+    description: 'Türkiye’nin en çok izlenen sokak lezzetleri programı kamerasıyla ocağın önüne geldi. Tüm ülke senin yaprak döner kesimini izleyecek!',
+    choices: [
+      {
+        label: 'Özel Tereyağlı İskender, Soslu Dürüm ve Künefe Şovu Yap (-1.600 ₺)',
+        outcomeText: 'Video 2 milyon izlendi! "Türkiye’nin En İyi Döner Ustası" başlığıyla viral oldun, kapıda kuyruk oluştu!',
+        effects: {
+          cashDelta: -1600,
+          reputationDelta: 10,
+          trafficMultiplierDelta: 0.45
+        }
+      },
+      {
+        label: 'Doğal Esnaf Samimiyetiyle Klasik Dürüm İkram Et (-500 ₺)',
+        outcomeText: 'Samimi sohbetin çok sevildi, mahalle ve şehir itibarın yükseldi.',
+        effects: {
+          cashDelta: -500,
+          reputationDelta: 5,
+          trafficMultiplierDelta: 0.20
+        }
+      }
+    ]
   }
 ];
 
