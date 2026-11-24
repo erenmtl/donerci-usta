@@ -165,17 +165,17 @@ export class UIManager {
     const tipEl = this.root.querySelector('#chart-tooltip');
     if (!tipEl) return;
 
-    const positionTooltip = (e) => {
-      const pad = 16;
+    const positionTooltipAtCoords = (clientX, clientY) => {
+      const pad = 12;
       const rect = tipEl.getBoundingClientRect();
-      let left = e.clientX + 16;
-      let top = e.clientY - 14;
+      let left = clientX + 16;
+      let top = clientY - 14;
 
       if (left + rect.width + pad > window.innerWidth) {
-        left = e.clientX - rect.width - 16;
+        left = Math.max(pad, clientX - rect.width - 14);
       }
       if (top + rect.height + pad > window.innerHeight) {
-        top = window.innerHeight - rect.height - pad;
+        top = Math.max(pad, window.innerHeight - rect.height - pad);
       }
       if (top < pad) top = pad;
 
@@ -183,10 +183,7 @@ export class UIManager {
       tipEl.style.top = `${top}px`;
     };
 
-    this.root.addEventListener('mouseover', (e) => {
-      const target = (e.target)?.closest?.('[data-chart-tip-title]');
-      if (!target) return;
-
+    const showTooltipForTarget = (target, clientX, clientY) => {
       const title = target.getAttribute('data-chart-tip-title') || '';
       const linesRaw = target.getAttribute('data-chart-tip-lines') || '';
       const color = target.getAttribute('data-chart-tip-color') || '#f5c76b';
@@ -201,7 +198,13 @@ export class UIManager {
         </div>
       `;
       tipEl.classList.add('visible');
-      positionTooltip(e);
+      positionTooltipAtCoords(clientX, clientY);
+    };
+
+    this.root.addEventListener('mouseover', (e) => {
+      const target = (e.target)?.closest?.('[data-chart-tip-title]');
+      if (!target) return;
+      showTooltipForTarget(target, e.clientX, e.clientY);
     });
 
     this.root.addEventListener('mousemove', (e) => {
@@ -211,8 +214,25 @@ export class UIManager {
         tipEl.classList.remove('visible');
         return;
       }
-      positionTooltip(e);
+      positionTooltipAtCoords(e.clientX, e.clientY);
     });
+
+    // Mobil Dokunmatik (Touch) Desteği: Grafik noktasına dokununca detayı açar
+    this.root.addEventListener(
+      'touchstart',
+      (e) => {
+        const target = (e.target)?.closest?.('[data-chart-tip-title]');
+        if (!target) {
+          tipEl.classList.remove('visible');
+          return;
+        }
+        const touch = e.touches[0];
+        if (touch) {
+          showTooltipForTarget(target, touch.clientX, Math.max(40, touch.clientY - 70));
+        }
+      },
+      { passive: true }
+    );
 
     this.root.addEventListener('mouseout', (e) => {
       const related = e.relatedTarget;
@@ -300,6 +320,8 @@ export class UIManager {
   }
 
   updateTopBarLive() {
+    // Arka plan sekmesindeyken gereksiz DOM manipülasyonunu atla (Mobil pil tasarrufu)
+    if (document.hidden) return;
     const st = this.engine.state;
     const setTxt = (id, val) => {
       const el = this.root.querySelector(id);
@@ -329,6 +351,7 @@ export class UIManager {
   }
 
   updateLiveDashboardCharts() {
+    if (document.hidden) return;
     const st = this.engine.state;
     const chartBox = this.root.querySelector('#live-intraday-chart-box');
     // Kullanıcı grafiğin üzerinde imleçle nokta inceliyorsa DOM'u yenileyip tooltip'i kapatma
@@ -2191,6 +2214,7 @@ export class UIManager {
               st.finance.veresiyeList.length === 0
                 ? `<div style="padding:18px;text-align:center;color:var(--text-muted);">Veresiye defterinde alacak kaydı yok.</div>`
                 : `
+              <div class="table-responsive">
               <table class="data-table">
                 <thead>
                   <tr>
@@ -2220,6 +2244,7 @@ export class UIManager {
                     .join('')}
                 </tbody>
               </table>
+              </div>
             `
             }
           </div>

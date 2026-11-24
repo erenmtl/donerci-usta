@@ -22,10 +22,14 @@ def build():
     with open(os.path.join(DOCS_DIR, '.nojekyll'), 'w', encoding='utf-8') as f:
         f.write('')
 
-    # public/assets kopyala
+    # public/assets ve manifest.webmanifest kopyala
     pub_assets = os.path.join(ROOT_DIR, 'public', 'assets')
     if os.path.exists(pub_assets):
         shutil.copytree(pub_assets, os.path.join(DOCS_DIR, 'assets'))
+
+    pub_manifest = os.path.join(ROOT_DIR, 'public', 'manifest.webmanifest')
+    if os.path.exists(pub_manifest):
+        shutil.copy2(pub_manifest, os.path.join(DOCS_DIR, 'manifest.webmanifest'))
 
     # src/ altındaki tüm dosyaları dönüştürerek docs/src/ altına yaz
     src_root = os.path.join(ROOT_DIR, 'src')

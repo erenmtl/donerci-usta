@@ -1,0 +1,11 @@
+{
+  "name": "Dönerci Usta – Esnaf & İşletme Simülasyonu",
+  "short_name": "Dönerci Usta",
+  "description": "Mahalle esnafı, aile ve döner imparatorluğu yönetim simülasyonu.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#09121b",
+  "theme_color": "#09121b",
+  "orientation": "any",
+  "lang": "tr"
+}

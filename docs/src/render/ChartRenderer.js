@@ -417,8 +417,7 @@ export class ChartRenderer {
             ].join('|');
 
             return `
-              <div class="chart-hover-target"
-                   style="display:grid;grid-template-columns:210px 1fr 130px;align-items:center;gap:12px;font-size:0.82rem;padding:3px 6px;border-radius:6px;"
+              <div class="menu-margin-row chart-hover-target"
                    data-chart-tip-title="${this.esc(`${r.icon} ${r.name}`)}"
                    data-chart-tip-lines="${this.esc(tipLines)}"
                    data-chart-tip-color="#38d39f">
