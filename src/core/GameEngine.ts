@@ -21,6 +21,9 @@ import { FURNITURE_CATALOG, WALL_STYLES, FLOOR_STYLES, SHOP_UPGRADES } from '../
 import { STREET_NPCS } from '../data/npcs.ts';
 import { RANDOM_EVENTS, SPECIAL_CALENDAR_DAYS, REVIEW_TEMPLATES } from '../data/events.ts';
 import { ACHIEVEMENTS, INVESTMENT_CATALOG, LOAN_PACKAGES } from '../data/achievements.ts';
+import { ReputationSystem } from './ReputationSystem.ts';
+import { QuestSystem } from './QuestSystem.ts';
+import { BranchSystem } from './BranchSystem.ts';
 
 export class GameEngine {
   public state!: GameState;
@@ -169,6 +172,37 @@ export class GameEngine {
         };
       }
     }
+
+    // Bayileşme, 3 Katmanlı İtibar, Görev ve Harita alanlarını eski kayıtlara ekle
+    if (!saved.branches || saved.branches.length === 0) {
+      saved.activeBranchId = 'branch_hq';
+      saved.branches = [BranchSystem.createHeadquartersBranch(saved)];
+    }
+    if (!saved.reputation) {
+      saved.reputation = {
+        neighborhoodReputation: Math.round(saved.shop.reputation || 64),
+        cityReputations: { istanbul: 62, ankara: 50, izmir: 50, bursa: 50 },
+        countryReputation: 54
+      };
+    }
+    if (!saved.quests) {
+      saved.quests = {
+        completedQuestIds: [],
+        currentTier: 1,
+        maxAllowedBranches: 1,
+        lifetimeCustomersServed: 22
+      };
+    }
+    if (!saved.mapView) {
+      const hqProv = saved.branches[0]?.provinceId || 'istanbul';
+      const hqDist = saved.branches[0]?.districtId || 'ist_besiktas';
+      saved.mapView = {
+        level: 'city',
+        selectedProvinceId: hqProv,
+        selectedDistrictId: hqDist
+      };
+    }
+    ReputationSystem.syncReputations(saved);
     return saved;
   }
 
@@ -371,7 +405,25 @@ export class GameEngine {
         }
       ],
       unlockedAchievements: [],
-      storyLog: []
+      storyLog: [],
+      activeBranchId: 'branch_hq',
+      branches: [],
+      reputation: {
+        neighborhoodReputation: 64,
+        cityReputations: { istanbul: 62, ankara: 50, izmir: 50, bursa: 50 },
+        countryReputation: 54
+      },
+      quests: {
+        completedQuestIds: [],
+        currentTier: 1,
+        maxAllowedBranches: 1,
+        lifetimeCustomersServed: 18
+      },
+      mapView: {
+        level: 'city',
+        selectedProvinceId: 'istanbul',
+        selectedDistrictId: 'ist_besiktas'
+      }
     };
   }
 
@@ -445,6 +497,15 @@ export class GameEngine {
     // Seçilen mahallenin sosyal çevresine göre başlangıç menüsünü optimize et
     this.applyNeighborhoodMenuPreset('social_optimal', true);
     this.recalculateShopStats();
+    this.state.activeBranchId = 'branch_hq';
+    const hqBranch = BranchSystem.createHeadquartersBranch(this.state);
+    this.state.branches = [hqBranch];
+    this.state.mapView = {
+      level: 'city',
+      selectedProvinceId: hqBranch.provinceId,
+      selectedDistrictId: hqBranch.districtId
+    };
+    ReputationSystem.syncReputations(this.state);
     SaveManager.saveAuto(this.state);
     this.startLoop();
     bus.emit('game:initialized', this.state);
@@ -723,6 +784,11 @@ export class GameEngine {
       this.customerSpawnAccumulator -= 1;
       this.processSingleCustomerArrival();
     }
+
+    // Arka plandaki diğer açık şubelerin gün içi müşteri ve satış akışı
+    BranchSystem.simulateBackgroundBranchesIntraday(this.state, minutesDelta);
+    ReputationSystem.syncReputations(this.state);
+    QuestSystem.evaluateQuests(this.state, this.getNetWorth());
   }
 
   private pickCustomerType(): CustomerType {
@@ -853,6 +919,7 @@ export class GameEngine {
     this.state.finance.todayStats.revenue += orderRevenue;
     this.state.finance.todayStats.ingredientCost += orderCost;
     this.state.finance.todayStats.customersServed += 1;
+    this.state.quests.lifetimeCustomersServed = (this.state.quests.lifetimeCustomersServed || 0) + 1;
     this.state.finance.todayStats.byCustomerType[cType] =
       (this.state.finance.todayStats.byCustomerType[cType] || 0) + 1;
 
@@ -860,6 +927,13 @@ export class GameEngine {
 
     const hasKomi = this.state.staff.some((s) => s.role === 'komi');
     this.state.shop.hygiene = Math.max(20, this.state.shop.hygiene - (hasKomi ? 0.05 : 0.22));
+    const activeBr = this.state.branches?.find((b) => b.id === this.state.activeBranchId);
+    ReputationSystem.checkBranchScandal(
+      this.state,
+      this.state.shop.name,
+      activeBr?.provinceId || 'istanbul',
+      this.state.shop.hygiene
+    );
 
     if (menuState.price <= demandInfo.maxBudgetPrice && this.state.shop.hygiene >= 72) {
       this.state.shop.reputation = Math.min(100, this.state.shop.reputation + 0.1);
@@ -1096,6 +1170,9 @@ export class GameEngine {
 
     this.generateDailyCustomerReview();
 
+    // Tüm şubelerin kira, vergi, uzak şehir lojistik ve holding yönetim giderlerini hesapla
+    BranchSystem.settleAllBranchesEndOfDay(st);
+
     const netProfit =
       st.finance.todayStats.revenue +
       st.finance.todayStats.investmentIncome -
@@ -1187,6 +1264,8 @@ export class GameEngine {
     for (const recId of Object.keys(st.menu)) {
       st.menu[recId].soldToday = 0;
     }
+    BranchSystem.resetDailyBranchCounters(st);
+    QuestSystem.evaluateQuests(st, this.getNetWorth());
 
     SaveManager.saveAuto(st);
     bus.emit('day:finished', entry);

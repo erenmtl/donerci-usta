@@ -138,6 +138,62 @@ export interface StreetEncounterLog {
   tone: 'good' | 'warn' | 'info';
 }
 
+export interface BranchSnapshot {
+  shop: GameState['shop'];
+  inventory: Record<string, IngredientStock>;
+  staff: StaffMember[];
+  menu: Record<string, MenuItemState>;
+}
+
+export interface BranchState {
+  id: string;
+  name: string;
+  provinceId: string;
+  provinceName: string;
+  districtId: string;
+  districtName: string;
+  neighborhoodType: string;
+  isHeadquarters: boolean;
+  neighborhoodReputation: number; // 1. Katman: Mahalle/İlçe İtibarı (0-100)
+  hygiene: number;
+  decorScore: number;
+  seatingCapacity: number;
+  dailyRentBase: number;
+  logisticsMultiplier: number;
+  openingCostPaid: number;
+  staffCount: number;
+  stockHealthPct: number;
+  todayRevenue: number;
+  todayIngredientCost: number;
+  todayRentAndTax: number;
+  todayLogisticsCost: number;
+  todayStaffCost: number;
+  todayNetProfit: number;
+  todayCustomers: number;
+  totalCumulativeProfit: number;
+  snapshot?: BranchSnapshot;
+}
+
+export interface ReputationHierarchyState {
+  neighborhoodReputation: number;          // Aktif şubenin mahalle/ilçe itibarı
+  cityReputations: Record<string, number>; // 2. Katman: İl bazlı şehir itibarı (istanbul: 65, ankara: 52 vb.)
+  countryReputation: number;               // 3. Katman: Tüm Türkiye ülke/marka itibarı
+  lastScandalNote?: string;
+}
+
+export interface QuestProgressState {
+  completedQuestIds: string[];
+  currentTier: number;        // 1..5
+  maxAllowedBranches: number; // Görevlerle açılan maksimum şube açma hakkı (Başlangıç: 1 -> Görevlerle 2, 3, 5, 8, 99)
+  lifetimeCustomersServed: number;
+}
+
+export interface MapViewState {
+  level: 'turkey' | 'city' | 'branch';
+  selectedProvinceId: string;
+  selectedDistrictId: string;
+}
+
 export interface GameState {
   initialized: boolean;
   difficulty: DifficultyLevel;
@@ -232,4 +288,11 @@ export interface GameState {
   reviews: CustomerReview[];
   unlockedAchievements: string[];
   storyLog: Array<{ day: number; title: string; text: string }>;
+
+  // BAYİLEŞME, GÖREV, 3 KATMANLI İTİBAR VE HARİTA SİSTEMİ
+  activeBranchId: string;
+  branches: BranchState[];
+  reputation: ReputationHierarchyState;
+  quests: QuestProgressState;
+  mapView: MapViewState;
 }
