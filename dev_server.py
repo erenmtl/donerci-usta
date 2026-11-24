@@ -82,13 +82,13 @@ def strip_typescript(ts_code: str) -> str:
 
     # 8. Değişken ve özellik tip anotasyonlarını (`const x: Type =`, `prop: Type =`) temizle
     code = re.sub(
-        r'(\b(?:const|let|var)\s+[A-Za-z0-9_]+)\s*:\s*[^=;\n]+\s*=',
+        r'(\b(?:const|let|var)\s+[A-Za-z0-9_]+)\s*:\s*[^=;\n]+\s*(?<!=)=(?!=)',
         r'\1 =',
         code
     )
-    # Sınıf özelliği `prop: Type = val;`
+    # Sınıf özelliği `prop: Type = val;` (asla == veya === ile eşleşmez)
     code = re.sub(
-        r'^(\s*[A-Za-z0-9_]+)\s*:\s*(?:Record<[^>]+>|Array<[^>]+>|[A-Za-z0-9_|\[\]\'"\s]+)\s*=',
+        r'^(\s*[A-Za-z0-9_]+)\s*:\s*(?:Record<[^>]+>|Array<[^>]+>|[A-Za-z0-9_|\[\]\'"\s]+)\s*(?<!=)=(?!=)',
         r'\1 =',
         code,
         flags=re.MULTILINE

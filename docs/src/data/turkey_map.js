@@ -575,6 +575,7 @@ export function getDistrictsForProvince(provinceId) {
       if (!byId[distId]) {
         const geo = ISTANBUL_REAL_SVG_PATHS[distId];
         const isAsian = asianSet.has(distId);
+        const isAdalar = distId === 'ist_adalar';
         byId[distId] = {
           id: distId,
           provinceId: 'istanbul',
@@ -582,9 +583,9 @@ export function getDistrictsForProvince(provinceId) {
           side: isAsian ? 'Anadolu Yakası' : 'Avrupa Yakası',
           mapX: geo.cx,
           mapY: geo.cy,
-          neighborhoodType === 'ist_adalar' ? 'turistik_merkez' : isAsian ? 'aile_semti' : 'carsi_sanayi',
-          openingCostBase === 'ist_adalar' ? 52000 : 39000,
-          dailyRentBase === 'ist_adalar' ? 660 : 490,
+          neighborhoodType: isAdalar ? 'turistik_merkez' : isAsian ? 'aile_semti' : 'carsi_sanayi',
+          openingCostBase: isAdalar ? 52000 : 39000,
+          dailyRentBase: isAdalar ? 660 : 490,
           customerPotential: 85,
           minCityRep: 46,
           minCountryRep: 42,

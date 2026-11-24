@@ -334,6 +334,7 @@ export class UIManager {
         const tab = (btn).getAttribute('data-tab');
         if (tab && tab !== this.activeTab) {
           this.activeTab = tab;
+          this.updateTopBarLive();
           this.updateNavHighlight();
           this.renderActiveTab(false);
         }
