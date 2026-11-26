@@ -516,7 +516,7 @@ export class ManagementSystem {
     const inf = state.finance.inflationIndex;
     state.chainManagement.chainPolicy.pricePolicy = mode;
 
-    const applyToMenu = (menu['menu'], hoodType) => {
+    const applyToMenu = (menu, hoodType) => {
       const hood = NEIGHBORHOOD_TYPES.find((n) => n.id === hoodType) || NEIGHBORHOOD_TYPES[0];
       const hoodMult =
         mode === 'mahalle_dinamik'

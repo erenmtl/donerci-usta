@@ -21,7 +21,7 @@ import {
 import { TURKEY_PROVINCES, type TurkeyRegion } from '../../data/turkey_map.ts';
 
 export class HqTab {
-  private static branchSortKey: 'profit' | 'revenue' | 'customers' | 'rep' | 'hygiene' = 'profit';
+  private static branchSortKey = 'profit';
   private static branchSortAsc = false;
 
   public static render(container: HTMLElement, engine: GameEngine, onSwitchTab: (tab: any) => void): void {

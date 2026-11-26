@@ -16,7 +16,7 @@ import {
 import { TURKEY_PROVINCES } from '../../data/turkey_map.js';
 
 export class HqTab {
-  static branchSortKey: 'profit' | 'revenue' | 'customers' | 'rep' | 'hygiene' = 'profit';
+  static branchSortKey = 'profit';
   static branchSortAsc = false;
 
   static render(container, engine, onSwitchTab) {
