@@ -520,9 +520,9 @@ export class ManagementSystem {
       const hood = NEIGHBORHOOD_TYPES.find((n) => n.id === hoodType) || NEIGHBORHOOD_TYPES[0];
       const hoodMult =
         mode === 'mahalle_dinamik'
-          ? hood.priceSensitivity < 1.0
+          ? hood.id === 'turistik_merkez'
             ? 1.15
-            : hood.priceSensitivity > 1.2
+            : hood.id === 'universite_mahallesi'
               ? 0.92
               : 1.02
           : mode === 'enflasyon_takip'

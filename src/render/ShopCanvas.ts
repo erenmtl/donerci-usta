@@ -283,7 +283,8 @@ export class ShopCanvas {
     }
 
     // 6. CANLI MÜŞTERİLER VE KONUŞMA/EMOJİ BALONLARI
-    for (const cust of this.engine.visualCustomers) {
+    const visualCustomers = (this.engine as any).visualCustomers || [];
+    for (const cust of visualCustomers) {
       const cx = m.startX + cust.x * m.gridW;
       const cy = m.startY + cust.y * (m.gridH + m.sidewalkHeight * 0.6);
       const bob = Math.sin(this.tickCount * 0.25 + cx) * 2;

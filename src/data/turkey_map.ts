@@ -5,6 +5,15 @@
 
 import { ISTANBUL_REAL_SVG_PATHS } from './real_maps_svg.ts';
 
+export type TurkeyRegion =
+  | 'Marmara'
+  | 'Ege'
+  | 'İç Anadolu'
+  | 'Akdeniz'
+  | 'Karadeniz'
+  | 'Doğu Anadolu'
+  | 'Güneydoğu Anadolu';
+
 export interface DistrictDef {
   id: string;
   provinceId: string;
@@ -856,7 +865,7 @@ export const TURKEY_PROVINCES: ProvinceDef[] = [
  * Herhangi bir il için ilçe listesini döndürür.
  * Özel tanımlı şehir haritası varsa onu, yoksa o ile ait 3 standart ilçeyi üretir.
  */
-export function getDistrictsForProvince(provinceId: string) {
+export function getDistrictsForProvince(provinceId: string): DistrictDef[] {
   if (provinceId === 'istanbul') {
     const baseList = CITY_DISTRICTS['istanbul'] || [];
     const byId: Record<string, DistrictDef> = {};

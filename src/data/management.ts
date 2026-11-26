@@ -243,7 +243,7 @@ export interface RegionalCultureProfile {
   summerTourismBoost: number;       // Yaz aylarında (Haziran-Ağustos) müşteri artışı
 }
 
-export const REGIONAL_CULTURE_MODIFIERS: Record<TurkeyRegion, RegionalCultureProfile> = {
+export const REGIONAL_CULTURE_MODIFIERS: Record<string, RegionalCultureProfile> = {
   'Marmara': {
     region: 'Marmara',
     summary: 'Hızlı servis, paket sipariş ve tombik/kaşarlı dürüm talebi çok yüksek.',

@@ -20,15 +20,15 @@ def strip_typescript(ts_code: str) -> str:
     Projede kullanılan TypeScript tip bildirimlerini (interface, type, import type,
     as Cast, erişim belirteçleri ve tip anotasyonlarını) temizleyerek saf ES2022 JS üretir.
     """
-    code = ts_code
+    code = ts_code.lstrip('\ufeff')
 
     # 1. import type { ... } from '...'; satırlarını kaldır
     code = re.sub(r'^\s*import\s+type\s+\{[^}]*\}\s+from\s+[\'"][^\'"]+[\'"];?\s*$', '', code, flags=re.MULTILINE)
     # Karma import içindeki ", type Foo" ifadelerini kaldır
     code = re.sub(r',\s*type\s+[A-Za-z0-9_]+', '', code)
 
-    # 2. export type Foo = ...; tek satırlık tip tanımlarını kaldır
-    code = re.sub(r'^\s*(?:export\s+)?type\s+[A-Za-z0-9_]+\s*=[^;]+;\s*$', '', code, flags=re.MULTILINE)
+    # 2. export type Foo = ...; tek veya çok satırlık tip tanımlarını kaldır
+    code = re.sub(r'^\s*(?:export\s+)?type\s+[A-Za-z0-9_]+\s*=[^;]+;\s*$', '', code, flags=re.MULTILINE | re.DOTALL)
 
     # 3. export interface Foo { ... } bloklarını dengeli süslü parantezle kaldır
     out = []
@@ -88,7 +88,7 @@ def strip_typescript(ts_code: str) -> str:
     code = re.sub(
         r'\)\s*:\s*(?:void|boolean|number|string|GridCoord\s*\|\s*null|GameState\s*\|\s*null|GameState|'
         r'SaveSlotMeta\[\]|CustomerType|BranchState|ChainManagementState|ManagerState\[\]|ManagerState|'
-        r'PolicyConfig|ManagementTier|BranchAlertItem\[\]|GameState\[\'shop\'\]|\{[^}]+\}|\[[^\]]+\]|Record<[^>]+>|\(\)\s*=>\s*void)\s*(\{|=>)',
+        r'PolicyConfig|ManagementTier|BranchAlertItem\[\]|DistrictDef\[\]|GameState\[\'shop\'\]|\{[^}]+\}|\[[^\]]+\]|Record<[^>]+>|\(\)\s*=>\s*void)\s*(\{|=>)',
         r') \1',
         code
     )
